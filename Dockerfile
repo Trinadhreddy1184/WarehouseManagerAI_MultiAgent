@@ -16,5 +16,5 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 EXPOSE 8501
 
-# Default command runs the Streamlit app (the docker-compose overrides this to run init_db first)
+# Default command runs the Streamlit app (docker-compose may override this)
 CMD ["streamlit", "run", "src/ui/app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
