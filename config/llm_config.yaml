@@ -1,0 +1,9 @@
+llm:
+  # The fully qualified Amazon Bedrock model ID.  See `.env` for examples.
+  model_id: ${BEDROCK_MODEL_ID}
+  temperature: ${LLM_TEMPERATURE}
+  top_p: ${LLM_TOP_P}
+  max_tokens: ${LLM_MAX_TOKENS}
+bedrock:
+  # AWS region for Bedrock runtime
+  region_name: ${AWS_REGION}

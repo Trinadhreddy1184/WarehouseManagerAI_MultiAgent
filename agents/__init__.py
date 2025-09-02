@@ -1,0 +1,1 @@
+"""Agents subpackage providing specialised behaviours and coordination."""
