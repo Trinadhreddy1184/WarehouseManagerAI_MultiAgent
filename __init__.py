@@ -1,0 +1,1 @@
+# This package contains all source code for the multi‑agent retail app.

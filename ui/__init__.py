@@ -1,0 +1,1 @@
+"""UI subpackage containing Streamlit front‑end components."""

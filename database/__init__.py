@@ -1,0 +1,1 @@
+"""Database subpackage exposing high‑level database functionality."""
