@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import List, Tuple
 
 from .base import AgentBase
-from ..llm.manager import LLMManager
+from src.llm.manager import LLMManager
 
 
 class GeneralChatAgent(AgentBase):
