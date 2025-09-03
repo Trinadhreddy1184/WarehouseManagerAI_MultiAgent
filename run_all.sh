@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Convenience script to build and run the multi‑agent app along with its database.
+# Convenience script to build and run the multi-agent app along with its database.
 
 set -euo pipefail
 
