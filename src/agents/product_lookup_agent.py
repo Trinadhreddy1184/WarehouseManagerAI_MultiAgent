@@ -11,7 +11,7 @@ import re
 from typing import List, Tuple
 
 from .base import AgentBase
-from ..database.db_manager import get_db
+from src.database.db_manager import get_db
 
 
 class ProductLookupAgent(AgentBase):
