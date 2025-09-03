@@ -2,11 +2,22 @@
 from __future__ import annotations
 
 import os
+
+import sys
+from pathlib import Path
+
 from typing import List, Tuple
 
 import streamlit as st
 from dotenv import load_dotenv
+# Ensure the project root is on the path so ``import src`` works
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
+from src.config.load_config import load_llm_config, load_database_config
+from src.llm.manager import LLMManager
+from src.agents.agent_manager import AgentManager
 
 
 def main() -> None:

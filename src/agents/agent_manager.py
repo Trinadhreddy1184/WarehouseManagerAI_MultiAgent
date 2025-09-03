@@ -13,7 +13,9 @@ from .base import AgentBase
 from .product_lookup_agent import ProductLookupAgent
 from .general_chat_agent import GeneralChatAgent
 from .response_evaluator import ResponseEvaluator
-from ..llm.manager import LLMManager
+
+from src.llm.manager import LLMManager
+
 
 
 class AgentManager:
