@@ -31,7 +31,6 @@ class BedrockLLM:
     def __init__(self, config: Dict[str, Any]) -> None:
         llm_conf = config.get("llm", {})
         bed_conf = config.get("bedrock", {})
-
         model_id = llm_conf.get("model_id")
         if not model_id or "$" in model_id:
             model_id = "anthropic.claude-v2:1"
@@ -49,6 +48,7 @@ class BedrockLLM:
         temperature = _safe_cast(llm_conf.get("temperature"), float, 0.2)
         top_p = _safe_cast(llm_conf.get("top_p"), float, 0.9)
         max_tokens = _safe_cast(llm_conf.get("max_tokens"), int, 400)
+
 
         # Create a Bedrock runtime client with adaptive retries
         self._br = boto3.client(

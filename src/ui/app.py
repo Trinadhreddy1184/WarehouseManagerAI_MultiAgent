@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import os
+
 import sys
 from pathlib import Path
+
 from typing import List, Tuple
 
 import streamlit as st
 from dotenv import load_dotenv
-
 # Ensure the project root is on the path so ``import src`` works
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
