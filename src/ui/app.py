@@ -2,21 +2,11 @@
 from __future__ import annotations
 
 import os
-import sys
-from pathlib import Path
 from typing import List, Tuple
 
 import streamlit as st
 from dotenv import load_dotenv
 
-# Ensure the src package is importable when running as a script
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from config.load_config import load_llm_config, load_database_config
-from llm.manager import LLMManager
-from agents.agent_manager import AgentManager
 
 
 def main() -> None:
