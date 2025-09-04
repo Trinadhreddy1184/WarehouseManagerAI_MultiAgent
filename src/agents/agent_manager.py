@@ -82,16 +82,4 @@ class AgentManager:
                 return response
             last_response = response
         logger.warning("All agents failed evaluation; returning last response")
-
-        scores = [(agent, agent.score_request(user_request, chat_history)) for agent in self.agents]
-        scores.sort(key=lambda item: item[1], reverse=True)
-        last_response = ""
-        for agent, _score in scores:
-            try:
-                response = agent.handle(user_request, chat_history)
-            except Exception:
-                continue
-            if self.evaluator.evaluate(user_request, response) >= self.evaluator.threshold:
-                return response
-            last_response = response
         return last_response
