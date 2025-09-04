@@ -26,7 +26,10 @@ explicit configuration for LLMs, data sources and runtime environment.
 - **Database integration** – a relational database (PostgreSQL by default) is
   used to store and query inventory data.  A helper script
   (`scripts/init_db.py`) downloads a `.sql` dump from S3 and creates the
-  database.  Database credentials and S3 details are stored in `.env`.
+  database.  Database credentials and S3 details are stored in `.env`.  The
+  Docker setup relies on the `ankane/pgvector` image and an init script that
+  runs `CREATE EXTENSION IF NOT EXISTS vector;` so the pgvector extension is
+  available for similarity search.
 - **Dockerised deployment** – the provided `Dockerfile` and
   `docker-compose.yaml` enable reproducible local or cloud deployments.  A
   `run_all.sh` script demonstrates a typical end‑to‑end workflow: build

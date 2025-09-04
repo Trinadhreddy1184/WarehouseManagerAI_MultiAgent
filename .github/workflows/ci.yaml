@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: ankane/pgvector:pg15
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_DB: warehouse
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app_pw
+        options: >-
+          --health-cmd "pg_isready -U app -d warehouse" --health-interval 5s --health-timeout 5s --health-retries 20 -v ${{ github.workspace }}/docker/initdb:/docker-entrypoint-initdb.d
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: pytest
