@@ -36,7 +36,10 @@ class ResponseEvaluator:
         """Return a score in [0, 1] for the supplied response."""
         text = response.lower()
         if any(re.search(pat, text) for pat in self.FAILURE_PATTERNS):
-            logger.debug("ResponseEvaluator: detected failure pattern in %s", response)
+            logger.debug(
+                "ResponseEvaluator: detected failure pattern in %s", response
+            )
             return 0.0
-        logger.debug("ResponseEvaluator: response deemed acceptable")
-        return 1.0
+        else:
+            logger.debug("ResponseEvaluator: response deemed acceptable")
+            return 1.0
