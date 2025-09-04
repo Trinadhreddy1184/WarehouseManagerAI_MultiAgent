@@ -2,7 +2,8 @@ version: "3.8"
 
 services:
   db:
-    image: ankane/pgvector
+    # Explicitly pin to the latest pgvector image; the pg16 tag does not exist
+    image: ankane/pgvector:latest
     container_name: retail_db
     restart: unless-stopped
     environment:
