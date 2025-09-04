@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 from typing import List, Tuple, Dict, Any
-
 import logging
 
 import boto3
@@ -21,9 +20,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableLambda
 
-
 logger = logging.getLogger(__name__)
-
 
 class BedrockLLM:
     """Amazon Bedrock chat wrapper.
@@ -36,7 +33,6 @@ class BedrockLLM:
     def __init__(self, config: Dict[str, Any]) -> None:
         llm_conf = config.get("llm", {})
         bed_conf = config.get("bedrock", {})
-
         model_id = llm_conf.get("model_id")
         if not model_id or "$" in model_id:
             model_id = "anthropic.claude-v2:1"
@@ -54,7 +50,6 @@ class BedrockLLM:
         temperature = _safe_cast(llm_conf.get("temperature"), float, 0.2)
         top_p = _safe_cast(llm_conf.get("top_p"), float, 0.9)
         max_tokens = _safe_cast(llm_conf.get("max_tokens"), int, 400)
-
         logger.debug(
             "Initialising BedrockLLM model_id=%s region=%s temperature=%s top_p=%s max_tokens=%s",
             model_id,
@@ -153,6 +148,7 @@ class BedrockLLM:
             self.client = RunnableLambda(_nova_runnable)
         else:
             logger.error("Unsupported Bedrock model id: %s", model_id)
+
             raise ValueError(f"Unsupported Bedrock model id: {model_id}")
 
         # Compose the pipeline: prompt → client → output parser
@@ -168,3 +164,8 @@ class BedrockLLM:
         })
         logger.debug("BedrockLLM response: %s", response)
         return response
+        # The chain expects chat_history as a list of dict/tuple structures
+        return self.chain.invoke({
+            "chat_history": chat_history,
+            "user_request": user_request,
+        })

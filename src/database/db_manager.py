@@ -10,15 +10,11 @@ import os
 from typing import Any, Optional, Mapping
 
 import logging
-
 import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
-
-
 logger = logging.getLogger(__name__)
-
 
 def _build_sqlalchemy_url() -> str:
     """Construct a SQLAlchemy connection URL from environment variables.
@@ -50,6 +46,9 @@ class DBManager:
     def query_df(self, sql: str, params: Optional[Mapping[str, Any]] = None) -> pd.DataFrame:
         """Execute a SELECT query and return the results as a DataFrame."""
         logger.debug("Running query: %s", sql)
+
+    def query_df(self, sql: str, params: Optional[Mapping[str, Any]] = None) -> pd.DataFrame:
+        """Execute a SELECT query and return the results as a DataFrame."""
         with self.engine.connect() as conn:
             return pd.read_sql(text(sql), conn, params=params)
 
@@ -65,6 +64,8 @@ class DBManager:
             logger.debug("Database engine disposed")
         except Exception as exc:  # pragma: no cover - best effort cleanup
             logger.exception("Error disposing engine: %s", exc)
+        except Exception:
+            pass
 
 
 # Global helper similar to the original project
