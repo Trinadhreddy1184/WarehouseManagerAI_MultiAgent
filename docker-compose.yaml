@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   db:
-    image: ankane/pgvector:pg16
+    image: ankane/pgvector
     container_name: retail_db
     restart: unless-stopped
     environment:
