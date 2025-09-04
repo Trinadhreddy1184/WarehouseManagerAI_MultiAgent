@@ -8,17 +8,19 @@ score/handle interface defined in :mod:`src.agents.base`.
 from __future__ import annotations
 
 from typing import List, Tuple, Optional
-
 import logging
-
 from .base import AgentBase
 from .product_lookup_agent import ProductLookupAgent
 from .general_chat_agent import GeneralChatAgent
 from .response_evaluator import ResponseEvaluator
+
 from src.llm.manager import LLMManager
 
 
 logger = logging.getLogger(__name__)
+
+
+from src.llm.manager import LLMManager
 
 
 class AgentManager:
@@ -43,13 +45,11 @@ class AgentManager:
             GeneralChatAgent(llm_manager),
         ]
         self.evaluator = evaluator or ResponseEvaluator()
-
         logger.debug(
             "AgentManager initialised with agents=%s evaluator_threshold=%s",
             [type(a).__name__ for a in self.agents],
             self.evaluator.threshold,
         )
-
     def handle_request(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
         """Dispatch a user request to the most appropriate agent.
 
@@ -82,4 +82,16 @@ class AgentManager:
                 return response
             last_response = response
         logger.warning("All agents failed evaluation; returning last response")
+
+        scores = [(agent, agent.score_request(user_request, chat_history)) for agent in self.agents]
+        scores.sort(key=lambda item: item[1], reverse=True)
+        last_response = ""
+        for agent, _score in scores:
+            try:
+                response = agent.handle(user_request, chat_history)
+            except Exception:
+                continue
+            if self.evaluator.evaluate(user_request, response) >= self.evaluator.threshold:
+                return response
+            last_response = response
         return last_response

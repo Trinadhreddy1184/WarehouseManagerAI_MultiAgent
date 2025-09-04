@@ -19,8 +19,8 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
-import logging
 
+import logging
 import boto3
 import requests
 
@@ -36,6 +36,9 @@ from database.db_manager import get_db  # noqa: E402  (import after path tweak)
 
 logger = logging.getLogger(__name__)
 
+from database.db_manager import get_db  # noqa: E402  (import after path tweak)
+
+
 
 def _load_sql() -> str:
     """Load SQL statements from S3, a URL or a local file."""
@@ -45,21 +48,29 @@ def _load_sql() -> str:
     local_path = os.getenv("SQL_FILE", str(ROOT / "data" / "init.sql"))
 
     if bucket and key:
+
         logger.info("Loading SQL from S3 bucket=%s key=%s", bucket, key)
+
         s3 = boto3.client("s3", region_name=os.getenv("S3_REGION"))
         obj = s3.get_object(Bucket=bucket, Key=key)
         return obj["Body"].read().decode("utf-8")
     if presigned:
         logger.info("Loading SQL from presigned URL")
+
         resp = requests.get(presigned, timeout=30)
         resp.raise_for_status()
         return resp.text
     if os.path.exists(local_path):
+
         logger.info("Loading SQL from local file %s", local_path)
         with open(local_path, "r", encoding="utf-8") as f:
             return f.read()
 
     logger.warning("No SQL source provided; using minimal schema")
+
+        with open(local_path, "r", encoding="utf-8") as f:
+            return f.read()
+
     # Fallback: minimal schema
     return """
     CREATE TABLE IF NOT EXISTS app_inventory (
@@ -84,6 +95,12 @@ def main() -> None:
         logger.debug("Executing statement: %s", statement)
         db.execute(statement)
     logger.info("Database initialisation complete")
+    db = get_db()
+    sql = _load_sql()
+    for statement in _split_statements(sql):
+        db.execute(statement)
+    print("Database initialisation complete")
+
 
 
 if __name__ == "__main__":
