@@ -1,6 +1,6 @@
 llm:
-  # The fully qualified Amazon Bedrock model ID.  See `.env` for examples.
-  model_id: ${BEDROCK_MODEL_ID}
+  # The fully qualified Amazon Bedrock model ID. Defaults to Amazon Nova Pro v1:0.
+  model_id: amazon.nova-pro-v1:0
   temperature: ${LLM_TEMPERATURE}
   top_p: ${LLM_TOP_P}
   max_tokens: ${LLM_MAX_TOKENS}

@@ -35,7 +35,7 @@ class BedrockLLM:
         bed_conf = config.get("bedrock", {})
         model_id = llm_conf.get("model_id")
         if not model_id or "$" in model_id:
-            model_id = "anthropic.claude-v2:1"
+            model_id = "amazon.nova-pro-v1:0"
 
         region = bed_conf.get("region_name")
         if not region or "$" in region:
