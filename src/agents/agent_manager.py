@@ -11,6 +11,7 @@ from typing import List, Tuple, Optional
 import logging
 from .base import AgentBase
 from .product_lookup_agent import ProductLookupAgent
+from .vector_search_agent import VectorSearchAgent
 from .general_chat_agent import GeneralChatAgent
 from .response_evaluator import ResponseEvaluator
 
@@ -41,6 +42,7 @@ class AgentManager:
         """
         self.llm_manager = llm_manager
         self.agents: List[AgentBase] = agents or [
+            VectorSearchAgent(llm_manager),
             ProductLookupAgent(),
             GeneralChatAgent(llm_manager),
         ]

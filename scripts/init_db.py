@@ -32,6 +32,10 @@ from config.logging_config import setup_logging  # noqa: E402
 from database.db_manager import get_db  # noqa: E402  (import after path tweak)
 
 from sqlalchemy import create_engine, text  # noqa: E402
+try:  # Optional dependency for pgvector
+    from pgvector.sqlalchemy import register_vector  # type: ignore  # noqa: E402
+except Exception:  # pragma: no cover - optional dependency
+    register_vector = None  # type: ignore
 
 
 logger = logging.getLogger(__name__)
@@ -111,6 +115,8 @@ def _execute_sql(sql: str, db_url: str) -> None:
     # handle every ``pg_dump`` feature but allows unit tests or simple setups
     # without ``psql`` to execute standard SQL statements.
     engine = create_engine(db_url, future=True)
+    if register_vector:
+        register_vector(engine)
     try:
         with engine.begin() as conn:
             conn.exec_driver_sql(sql)
@@ -125,6 +131,19 @@ def main() -> None:
         db = get_db()
         sql = _load_sql()
         _execute_sql(sql, db.url)
+        # Ensure pgvector extension and embedding table exist
+        db.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS inventory_embeddings (
+                id BIGSERIAL PRIMARY KEY,
+                store TEXT,
+                product_name TEXT,
+                brand_name TEXT,
+                embedding vector(1536)
+            );
+            """
+        )
     except Exception:
         logger.exception("Database initialisation failed")
         sys.exit(1)

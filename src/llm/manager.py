@@ -48,7 +48,13 @@ class LLMManager:
         llm = BedrockLLM(config)
         return cls(config, llm)
 
-    def generate(self, user_request: str, chat_history: List[Tuple[str, str]] | None = None) -> str:
+    def generate(
+        self,
+        user_request: str,
+        chat_history: List[Tuple[str, str]] | None = None,
+        *,
+        context: str | None = None,
+    ) -> str:
         """Generate a response from the underlying LLM.
 
         Parameters
@@ -61,7 +67,7 @@ class LLMManager:
         """
 
         logger.info("Generating response for request: %s", user_request)
-        response = self.llm.generate(user_request, chat_history or [])
+        response = self.llm.generate(user_request, chat_history or [], context=context)
         logger.debug("LLMManager received response: %s", response)
         return response
 
