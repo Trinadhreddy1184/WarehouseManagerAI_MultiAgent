@@ -54,8 +54,8 @@ explicit configuration for LLMs, data sources and runtime environment.
    pip install -r requirements.txt
    ```
 
-3. **Copy the `.env.example` to `.env` and edit it** – set your AWS region,
-   Bedrock model ID, database credentials, S3 bucket and key.
+3. **Copy the `.env.example` to `.env` and edit it** – set your AWS region, database credentials, S3 bucket and key.
+   For the LLM configuration set `BEDROCK_MODEL_ID=amazon.nova-pro-v1:0`.
 
 4. **Initialise the database**
 
