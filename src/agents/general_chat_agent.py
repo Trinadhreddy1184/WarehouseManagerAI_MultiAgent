@@ -13,12 +13,7 @@ import logging
 from .base import AgentBase
 from src.llm.manager import LLMManager
 
-
 logger = logging.getLogger(__name__)
-
-from .base import AgentBase
-
-from src.llm.manager import LLMManager
 
 
 
@@ -54,7 +49,4 @@ class GeneralChatAgent(AgentBase):
                 "The language model is unavailable. Please verify your AWS "
                 "credentials and Bedrock configuration."
             )
-
-        # Simply forward the request to the LLM
-        return self.llm_manager.generate(user_request, chat_history)
 
