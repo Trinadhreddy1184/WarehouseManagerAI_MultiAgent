@@ -69,7 +69,12 @@ class BedrockLLM:
         # Build a common prompt template
         self.prompt = ChatPromptTemplate.from_messages(
             [
-                ("system", "You are an inventory assistant. Be concise and factual."),
+                (
+                    "system",
+                    "You are an inventory assistant. Be concise and factual. "
+                    "Use the provided context to answer the user and say 'I don't know' if unsure.",
+                ),
+                ("system", "{context}"),
                 MessagesPlaceholder("chat_history"),
                 ("human", "{user_request}"),
             ]
@@ -154,13 +159,20 @@ class BedrockLLM:
         # Compose the pipeline: prompt → client → output parser
         self.chain = self.prompt | self.client | StrOutputParser()
 
-    def generate(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
+    def generate(
+        self,
+        user_request: str,
+        chat_history: List[Tuple[str, str]],
+        context: str | None = None,
+    ) -> str:
         """Generate a response based on the user request and chat history."""
         logger.info("Generating response via BedrockLLM")
-        # The chain expects chat_history as a list of dict/tuple structures
-        response = self.chain.invoke({
-            "chat_history": chat_history,
-            "user_request": user_request,
-        })
+        response = self.chain.invoke(
+            {
+                "chat_history": chat_history,
+                "user_request": user_request,
+                "context": context or "",
+            }
+        )
         logger.debug("BedrockLLM response: %s", response)
         return response
