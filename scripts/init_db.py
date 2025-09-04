@@ -19,7 +19,6 @@ import subprocess
 from pathlib import Path
 
 import logging
-import boto3
 import requests
 
 # Ensure the src package is on the Python path when executed as a script
@@ -50,9 +49,14 @@ def _load_sql() -> str:
     if bucket and key:
         logger.info("Loading SQL from S3 bucket=%s key=%s", bucket, key)
         try:
-            s3 = boto3.client("s3", region_name=os.getenv("S3_REGION"))
-            obj = s3.get_object(Bucket=bucket, Key=key)
-            return obj["Body"].read().decode("utf-8")
+            s3_uri = f"s3://{bucket}/{key}"
+            result = subprocess.run(
+                ["aws", "s3", "cp", s3_uri, "-"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return result.stdout
         except Exception as exc:
             logger.exception("Failed to load SQL from S3: %s", exc)
             raise
