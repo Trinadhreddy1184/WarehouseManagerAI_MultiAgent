@@ -13,7 +13,6 @@ import logging
 import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
 logger = logging.getLogger(__name__)
 
 def _build_sqlalchemy_url() -> str:
@@ -21,8 +20,10 @@ def _build_sqlalchemy_url() -> str:
 
     If the environment variable ``DATABASE_URL`` is set it will be used
     directly.  Otherwise individual variables ``DB_HOST``, ``DB_PORT``,
-    ``DB_NAME``, ``DB_USER`` and ``DB_PASS`` are used to assemble a URL of
-    the form ``postgresql://user:password@host:port/db``.
+    ``DB_NAME``, ``DB_USER`` and a password are used to assemble a URL of
+    the form ``postgresql://user:password@host:port/db``.  ``DB_PASSWORD``
+    is preferred for specifying the password but ``DB_PASS`` is honoured for
+    backwards compatibility.
     """
     url = os.getenv("DATABASE_URL")
     if url:
@@ -31,7 +32,7 @@ def _build_sqlalchemy_url() -> str:
     port = os.getenv("DB_PORT", "5432")
     db = os.getenv("DB_NAME", "warehouse")
     user = os.getenv("DB_USER", "app")
-    pwd = os.getenv("DB_PASS", "app_pw")
+    pwd = os.getenv("DB_PASSWORD") or os.getenv("DB_PASS", "app_pw")
     return f"postgresql://{user}:{pwd}@{host}:{port}/{db}"
 
 
@@ -46,9 +47,6 @@ class DBManager:
     def query_df(self, sql: str, params: Optional[Mapping[str, Any]] = None) -> pd.DataFrame:
         """Execute a SELECT query and return the results as a DataFrame."""
         logger.debug("Running query: %s", sql)
-
-    def query_df(self, sql: str, params: Optional[Mapping[str, Any]] = None) -> pd.DataFrame:
-        """Execute a SELECT query and return the results as a DataFrame."""
         with self.engine.connect() as conn:
             return pd.read_sql(text(sql), conn, params=params)
 
@@ -64,8 +62,6 @@ class DBManager:
             logger.debug("Database engine disposed")
         except Exception as exc:  # pragma: no cover - best effort cleanup
             logger.exception("Error disposing engine: %s", exc)
-        except Exception:
-            pass
 
 
 # Global helper similar to the original project
