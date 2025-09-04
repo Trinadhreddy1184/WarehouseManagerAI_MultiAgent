@@ -28,9 +28,11 @@ explicit configuration for LLMs, data sources and runtime environment.
   (`scripts/init_db.py`) downloads a `.sql` dump from S3 and creates the
   database.  Database credentials and S3 details are stored in `.env`.
 - **Dockerised deployment** – the provided `Dockerfile` and
-  `docker-compose.yaml` enable reproducible local or cloud deployments.  A
-  `run_all.sh` script demonstrates a typical end‑to‑end workflow: build
-  containers, initialise the database and launch the Streamlit UI.
+  `docker-compose.yaml` enable reproducible local or cloud deployments.  The
+  image now installs the `postgresql-client` package so database setup scripts
+  can invoke `psql`.  A `run_all.sh` script demonstrates a typical end‑to‑end
+  workflow: build containers, initialise the database and launch the Streamlit
+  UI.
 - **Testing and scripts** – skeleton unit tests under `tests/` help verify
   agent scoring and LLM integrations.  Additional scripts (`clear_out.sh`,
   etc.) are provided to tear down the environment between runs.

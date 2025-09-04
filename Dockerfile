@@ -5,6 +5,7 @@ WORKDIR /app
 # Install system dependencies if needed (none here, but added for completeness)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    postgresql-client \
  && rm -rf /var/lib/apt/lists/*
 
 # Copy application code
