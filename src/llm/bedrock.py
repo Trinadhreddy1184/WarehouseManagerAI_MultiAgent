@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 from typing import List, Tuple, Dict, Any
+import logging
 
 import boto3
 from botocore.config import Config as BotoConfig
@@ -19,6 +20,7 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableLambda
 
+logger = logging.getLogger(__name__)
 
 class BedrockLLM:
     """Amazon Bedrock chat wrapper.
@@ -48,7 +50,14 @@ class BedrockLLM:
         temperature = _safe_cast(llm_conf.get("temperature"), float, 0.2)
         top_p = _safe_cast(llm_conf.get("top_p"), float, 0.9)
         max_tokens = _safe_cast(llm_conf.get("max_tokens"), int, 400)
-
+        logger.debug(
+            "Initialising BedrockLLM model_id=%s region=%s temperature=%s top_p=%s max_tokens=%s",
+            model_id,
+            region,
+            temperature,
+            top_p,
+            max_tokens,
+        )
 
         # Create a Bedrock runtime client with adaptive retries
         self._br = boto3.client(
@@ -68,6 +77,7 @@ class BedrockLLM:
 
         # Determine which Bedrock invocation API to use
         if model_id.startswith("anthropic."):
+            logger.debug("Using ChatBedrock interface for model %s", model_id)
             # Claude (Anthropic) models use the ChatBedrock interface
             self.client = ChatBedrock(
                 model_id=model_id,
@@ -80,6 +90,7 @@ class BedrockLLM:
                 },
             )
         elif model_id.startswith("amazon.nova-"):
+            logger.debug("Using converse API for model %s", model_id)
             # Amazon Nova models use the `converse` API wrapped in a Runnable
             def _normalize_to_role_text(x: Any) -> Tuple[str, str]:
                 """Normalize various message formats into (role, text)."""
@@ -136,6 +147,8 @@ class BedrockLLM:
 
             self.client = RunnableLambda(_nova_runnable)
         else:
+            logger.error("Unsupported Bedrock model id: %s", model_id)
+
             raise ValueError(f"Unsupported Bedrock model id: {model_id}")
 
         # Compose the pipeline: prompt → client → output parser
@@ -143,6 +156,14 @@ class BedrockLLM:
 
     def generate(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
         """Generate a response based on the user request and chat history."""
+        logger.info("Generating response via BedrockLLM")
+        # The chain expects chat_history as a list of dict/tuple structures
+        response = self.chain.invoke({
+            "chat_history": chat_history,
+            "user_request": user_request,
+        })
+        logger.debug("BedrockLLM response: %s", response)
+        return response
         # The chain expects chat_history as a list of dict/tuple structures
         return self.chain.invoke({
             "chat_history": chat_history,

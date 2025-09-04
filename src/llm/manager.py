@@ -9,8 +9,15 @@ from __future__ import annotations
 
 from typing import List, Tuple, Dict, Any, Optional
 
+import logging
+
 from .bedrock import BedrockLLM
 
+
+logger = logging.getLogger(__name__)
+
+
+from .bedrock import BedrockLLM
 
 class LLMManager:
     """Entry point for working with LLMs.
@@ -31,11 +38,17 @@ class LLMManager:
         self.config = config
         self.llm = llm
 
+        logger.debug("LLMManager initialised with config: %s", config)
+
+
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> "LLMManager":
         """Instantiate the manager from a configuration dictionary."""
         # Currently we only support Bedrock models.  Additional providers can
         # be added here.
+
+        logger.info("Creating LLMManager from config")
+
         llm = BedrockLLM(config)
         return cls(config, llm)
 
@@ -50,4 +63,11 @@ class LLMManager:
             Past conversation history in alternating roles.  If omitted an
             empty history is assumed.
         """
+
+        logger.info("Generating response for request: %s", user_request)
+        response = self.llm.generate(user_request, chat_history or [])
+        logger.debug("LLMManager received response: %s", response)
+        return response
+
         return self.llm.generate(user_request, chat_history or [])
+
