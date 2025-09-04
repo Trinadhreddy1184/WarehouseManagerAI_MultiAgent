@@ -31,6 +31,8 @@ if str(SRC) not in sys.path:
 from config.logging_config import setup_logging  # noqa: E402
 from database.db_manager import get_db  # noqa: E402  (import after path tweak)
 
+from sqlalchemy import create_engine, text  # noqa: E402
+
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +83,15 @@ def _load_sql() -> str:
 
 
 def _execute_sql(sql: str, db_url: str) -> None:
-    """Execute SQL script using psql for pg_dump compatibility."""
+    """Execute a SQL script against ``db_url``.
+
+    The function prefers the ``psql`` command line client for maximum
+    compatibility with dumps produced by ``pg_dump``.  If ``psql`` is not
+    available (for example when running in a minimal test environment) it
+    falls back to using SQLAlchemy directly so that at least basic
+    statements can be executed.  Any errors from ``psql`` are surfaced to the
+    caller so that the initialisation can fail fast.
+    """
     try:
         subprocess.run(
             ["psql", db_url, "-v", "ON_ERROR_STOP=1"],
@@ -90,9 +100,22 @@ def _execute_sql(sql: str, db_url: str) -> None:
             check=True,
             capture_output=True,
         )
+        return
+    except FileNotFoundError:
+        logger.warning("psql not found – falling back to SQLAlchemy execution")
     except subprocess.CalledProcessError as exc:
         logger.error("psql failed: %s", exc.stderr.strip())
         raise
+
+    # Fallback using SQLAlchemy; this is a best-effort approach and will not
+    # handle every ``pg_dump`` feature but allows unit tests or simple setups
+    # without ``psql`` to execute standard SQL statements.
+    engine = create_engine(db_url, future=True)
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql(sql)
+    finally:
+        engine.dispose()
 
 
 def main() -> None:
