@@ -6,9 +6,16 @@ from sqlalchemy import text
 from src.database.db_manager import get_db
 from src.llm.embeddings import EmbeddingManager
 
+try:  # optional pgvector adapter
+    from pgvector.sqlalchemy import register_vector  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    register_vector = None  # type: ignore
+
 
 def main() -> None:
     db = get_db()
+    if register_vector:
+        register_vector(db.engine)
     embedder = EmbeddingManager()
     df = db.query_df("SELECT store, product_name, brand_name FROM app_inventory")
     if df.empty:
