@@ -13,12 +13,10 @@ If none of these are supplied the script simply ensures that the
 """
 from __future__ import annotations
 
-import io
 import os
 import sys
+import subprocess
 from pathlib import Path
-from typing import Iterable
-
 
 import logging
 import boto3
@@ -36,10 +34,6 @@ from database.db_manager import get_db  # noqa: E402  (import after path tweak)
 
 logger = logging.getLogger(__name__)
 
-from database.db_manager import get_db  # noqa: E402  (import after path tweak)
-
-
-
 def _load_sql() -> str:
     """Load SQL statements from S3, a URL or a local file."""
     bucket = os.getenv("S3_BUCKET")
@@ -48,30 +42,35 @@ def _load_sql() -> str:
     local_path = os.getenv("SQL_FILE", str(ROOT / "data" / "init.sql"))
 
     if bucket and key:
-
         logger.info("Loading SQL from S3 bucket=%s key=%s", bucket, key)
+        try:
+            s3 = boto3.client("s3", region_name=os.getenv("S3_REGION"))
+            obj = s3.get_object(Bucket=bucket, Key=key)
+            return obj["Body"].read().decode("utf-8")
+        except Exception as exc:
+            logger.exception("Failed to load SQL from S3: %s", exc)
+            raise
 
-        s3 = boto3.client("s3", region_name=os.getenv("S3_REGION"))
-        obj = s3.get_object(Bucket=bucket, Key=key)
-        return obj["Body"].read().decode("utf-8")
     if presigned:
         logger.info("Loading SQL from presigned URL")
+        try:
+            resp = requests.get(presigned, timeout=30)
+            resp.raise_for_status()
+            return resp.text
+        except Exception as exc:
+            logger.exception("Failed to load SQL from URL: %s", exc)
+            raise
 
-        resp = requests.get(presigned, timeout=30)
-        resp.raise_for_status()
-        return resp.text
     if os.path.exists(local_path):
-
         logger.info("Loading SQL from local file %s", local_path)
-        with open(local_path, "r", encoding="utf-8") as f:
-            return f.read()
+        try:
+            with open(local_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception as exc:
+            logger.exception("Failed to read SQL file %s: %s", local_path, exc)
+            raise
 
     logger.warning("No SQL source provided; using minimal schema")
-
-        with open(local_path, "r", encoding="utf-8") as f:
-            return f.read()
-
-    # Fallback: minimal schema
     return """
     CREATE TABLE IF NOT EXISTS app_inventory (
         store TEXT,
@@ -81,25 +80,32 @@ def _load_sql() -> str:
     """
 
 
-def _split_statements(sql: str) -> Iterable[str]:
-    """Split SQL script into individual statements."""
-    return [stmt.strip() for stmt in sql.split(";") if stmt.strip()]
+def _execute_sql(sql: str, db_url: str) -> None:
+    """Execute SQL script using psql for pg_dump compatibility."""
+    try:
+        subprocess.run(
+            ["psql", db_url, "-v", "ON_ERROR_STOP=1"],
+            input=sql,
+            text=True,
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        logger.error("psql failed: %s", exc.stderr.strip())
+        raise
 
 
 def main() -> None:
     setup_logging()
     logger.info("Starting database initialisation")
-    db = get_db()
-    sql = _load_sql()
-    for statement in _split_statements(sql):
-        logger.debug("Executing statement: %s", statement)
-        db.execute(statement)
+    try:
+        db = get_db()
+        sql = _load_sql()
+        _execute_sql(sql, db.url)
+    except Exception:
+        logger.exception("Database initialisation failed")
+        sys.exit(1)
     logger.info("Database initialisation complete")
-    db = get_db()
-    sql = _load_sql()
-    for statement in _split_statements(sql):
-        db.execute(statement)
-    print("Database initialisation complete")
 
 
 
