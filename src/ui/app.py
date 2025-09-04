@@ -61,7 +61,11 @@ def main() -> None:
         st.session_state["chat_history"]: List[Tuple[str, str]] = []
 
     # Prompt input
-    user_input = st.text_input("Ask a question", placeholder="E.g. What whiskies are in stock?", key="prompt")
+    user_input = st.text_input(
+        "Ask a question",
+        placeholder="E.g. What whiskies are in stock?",
+        key="prompt",
+    )
 
     if user_input:
 
@@ -78,10 +82,8 @@ def main() -> None:
 
     # Display chat history
     for role, text in st.session_state.get("chat_history", []):
-        if role == "user":
-            st.markdown(f"**You:** {text}")
-        else:
-            st.markdown(f"**Assistant:** {text}")
+        with st.chat_message("assistant" if role != "user" else "user"):
+            st.markdown(text)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ from src.llm.manager import LLMManager
 
 
 class DummyLLM:
-    def generate(self, user_request, chat_history):
+    def generate(self, user_request, chat_history, context=None):
         return "dummy"
 
 
@@ -52,7 +52,7 @@ def test_returns_first_satisfactory_response():
 
 def test_general_chat_returns_error_when_llm_unavailable():
     class FailingLLM:
-        def generate(self, user_request, chat_history):
+        def generate(self, user_request, chat_history, context=None):
             raise RuntimeError("boom")
 
     llm_mgr = LLMManager({}, FailingLLM())
