@@ -13,11 +13,7 @@ import logging
 
 from .bedrock import BedrockLLM
 
-
 logger = logging.getLogger(__name__)
-
-
-from .bedrock import BedrockLLM
 
 class LLMManager:
     """Entry point for working with LLMs.
@@ -69,5 +65,4 @@ class LLMManager:
         logger.debug("LLMManager received response: %s", response)
         return response
 
-        return self.llm.generate(user_request, chat_history or [])
 
