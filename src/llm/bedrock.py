@@ -164,8 +164,3 @@ class BedrockLLM:
         })
         logger.debug("BedrockLLM response: %s", response)
         return response
-        # The chain expects chat_history as a list of dict/tuple structures
-        return self.chain.invoke({
-            "chat_history": chat_history,
-            "user_request": user_request,
-        })
