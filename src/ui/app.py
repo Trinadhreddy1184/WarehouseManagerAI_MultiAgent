@@ -10,7 +10,6 @@ import logging
 
 import streamlit as st
 from dotenv import load_dotenv
-from dotenv import load_dotenv
 
 # Ensure the project root is on the path so ``import src`` works
 ROOT = Path(__file__).resolve().parents[2]
@@ -29,9 +28,8 @@ logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    """Run the Streamlit application."""
     setup_logging()
-
-def main() -> None:
 
     # Load environment variables from a .env file if present
     load_dotenv()
@@ -49,9 +47,6 @@ def main() -> None:
     logger.debug("Loading LLM config from %s", llm_config_path)
     llm_config = load_llm_config(llm_config_path)
     logger.debug("Loading DB config from %s", db_config_path)
-
-    llm_config = load_llm_config(llm_config_path)
-
     _ = load_database_config(db_config_path)  # currently unused; ensures env vars are loaded
 
     # Create LLM and agent manager
