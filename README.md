@@ -23,7 +23,7 @@ explicit configuration for LLMs, data sources and runtime environment.
 - **Streamlit user interface** – the front‑end is a simple Streamlit app
   (`src/ui/app.py`) that presents a chat box and conversation history.  It
   demonstrates how to integrate agents and LLMs into a modern web UI.
-- **Database integration** – a PostgreSQL database with the pgvector extension (via the `ankane/pgvector:pg16` image) is
+- **Database integration** – a PostgreSQL database with the pgvector extension (via the `ankane/pgvector` image) is
   used to store and query inventory data.  A helper script
   (`scripts/init_db.py`) downloads a `.sql` dump from S3 and creates the
   database.  Database credentials and S3 details are stored in `.env`.
