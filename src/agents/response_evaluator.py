@@ -10,6 +10,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+import logging
+
+
+logger = logging.getLogger(__name__)
+
+
 
 @dataclass
 class ResponseEvaluator:
@@ -31,5 +37,11 @@ class ResponseEvaluator:
         """Return a score in [0, 1] for the supplied response."""
         text = response.lower()
         if any(re.search(pat, text) for pat in self.FAILURE_PATTERNS):
+
+            logger.debug("ResponseEvaluator: detected failure pattern in %s", response)
             return 0.0
+        logger.debug("ResponseEvaluator: response deemed acceptable")
+
+            return 0.0
+
         return 1.0

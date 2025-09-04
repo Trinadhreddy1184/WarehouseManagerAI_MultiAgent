@@ -9,11 +9,12 @@ from __future__ import annotations
 import os
 from typing import Any, Optional, Mapping
 
+import logging
 import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
-
+logger = logging.getLogger(__name__)
 
 def _build_sqlalchemy_url() -> str:
     """Construct a SQLAlchemy connection URL from environment variables.
@@ -40,6 +41,11 @@ class DBManager:
     def __init__(self, url: Optional[str] = None) -> None:
         self.url = url or _build_sqlalchemy_url()
         self.engine: Engine = create_engine(self.url, pool_pre_ping=True, future=True)
+        logger.debug("DBManager initialised with url=%s", self.url)
+
+    def query_df(self, sql: str, params: Optional[Mapping[str, Any]] = None) -> pd.DataFrame:
+        """Execute a SELECT query and return the results as a DataFrame."""
+        logger.debug("Running query: %s", sql)
 
     def query_df(self, sql: str, params: Optional[Mapping[str, Any]] = None) -> pd.DataFrame:
         """Execute a SELECT query and return the results as a DataFrame."""
@@ -48,12 +54,16 @@ class DBManager:
 
     def execute(self, sql: str, params: Optional[Mapping[str, Any]] = None) -> None:
         """Execute a non‑returning statement (INSERT/UPDATE/DDL)."""
+        logger.debug("Executing statement: %s", sql)
         with self.engine.begin() as conn:
             conn.execute(text(sql), params or {})
 
     def close(self) -> None:
         try:
             self.engine.dispose()
+            logger.debug("Database engine disposed")
+        except Exception as exc:  # pragma: no cover - best effort cleanup
+            logger.exception("Error disposing engine: %s", exc)
         except Exception:
             pass
 
@@ -70,5 +80,6 @@ def get_db(url: Optional[str] = None) -> DBManager:
     """
     global _GLOBAL_DB
     if _GLOBAL_DB is None:
+        logger.info("Creating global DBManager instance")
         _GLOBAL_DB = DBManager(url)
     return _GLOBAL_DB

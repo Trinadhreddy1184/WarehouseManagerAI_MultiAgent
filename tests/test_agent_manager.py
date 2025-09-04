@@ -7,6 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from src.agents.agent_manager import AgentManager
 from src.agents.base import AgentBase
 from src.agents.response_evaluator import ResponseEvaluator
+from src.agents.general_chat_agent import GeneralChatAgent
 from src.llm.manager import LLMManager
 
 
@@ -47,3 +48,15 @@ def test_returns_first_satisfactory_response():
         DummyAgent(0.5, "fallback"),
     )
     assert manager.handle_request("request", []) == "all good"
+
+
+def test_general_chat_returns_error_when_llm_unavailable():
+    class FailingLLM:
+        def generate(self, user_request, chat_history):
+            raise RuntimeError("boom")
+
+    llm_mgr = LLMManager({}, FailingLLM())
+    agent = GeneralChatAgent(llm_mgr)
+    manager = AgentManager(llm_mgr, agents=[agent])
+    response = manager.handle_request("hello", [])
+    assert "language model is unavailable" in response.lower()
