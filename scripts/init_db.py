@@ -128,6 +128,15 @@ def _execute_sql(sql: str, db_url: str) -> None:
         engine.dispose()
 
 
+def _index_embeddings() -> None:
+    """Populate the ``inventory_embeddings`` table with vector representations."""
+    try:
+        from . import index_embeddings  # type: ignore
+    except Exception:  # pragma: no cover - when run as script
+        import index_embeddings  # type: ignore
+    index_embeddings.main()
+
+
 def main() -> None:
     setup_logging()
     logger.info("Starting database initialisation")
@@ -148,6 +157,7 @@ def main() -> None:
             );
             """
         )
+        _index_embeddings()
     except Exception:
         logger.exception("Database initialisation failed")
         sys.exit(1)

@@ -1,10 +1,19 @@
 """Populate the ``inventory_embeddings`` table with vector representations."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 from sqlalchemy import text
 
-from src.database.db_manager import get_db
-from src.llm.embeddings import EmbeddingManager
+# Ensure ``src`` is importable when this script is executed directly
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from database.db_manager import get_db
+from llm.embeddings import EmbeddingManager
 
 try:  # optional pgvector adapter
     from pgvector.sqlalchemy import register_vector  # type: ignore
