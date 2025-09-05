@@ -24,9 +24,11 @@ explicit configuration for LLMs, data sources and runtime environment.
   (`src/ui/app.py`) that presents a chat box and conversation history.  It
   demonstrates how to integrate agents and LLMs into a modern web UI.
 - **Database integration** – a PostgreSQL database with the pgvector extension (via the `ankane/pgvector` image) is
-  used to store and query inventory data.  A helper script
-  (`scripts/init_db.py`) downloads a `.sql` dump from S3 and creates the
-  database.  Database credentials and S3 details are stored in `.env`.
+  used to store and query inventory data.  The `run_all.sh` helper script
+  downloads the `.sql` dump from S3, imports it into the database, verifies the
+  expected tables exist and then launches the app; `scripts/init_db.py` simply
+  verifies the database and required extensions.  Database credentials and S3
+  details are stored in `.env`.
 - **Dockerised deployment** – the provided `Dockerfile` and
   `docker-compose.yaml` enable reproducible local or cloud deployments.  The
   image now installs the `postgresql-client` package so database setup scripts
@@ -58,6 +60,9 @@ explicit configuration for LLMs, data sources and runtime environment.
    For the LLM configuration set `BEDROCK_MODEL_ID=amazon.nova-pro-v1:0`.
 
 4. **Initialise the database**
+
+   Import the inventory SQL dump first (the provided `run_all.sh` script does
+   this automatically before launching the app) or load it manually, then run:
 
    ```sh
    python scripts/init_db.py
