@@ -1,9 +1,9 @@
 """Agent specialising in simple product lookups.
 
 Given a user request, this agent attempts to parse out product or brand names
-and performs a fuzzy search against an ``app_inventory`` table in the
-database.  If there are no obvious product terms in the prompt the agent
-assigns itself a low score so that other agents can take over.
+and searches the imported ``vip_products`` and ``vip_brands`` tables for
+matches. If there are no obvious product terms in the prompt the agent assigns
+itself a low score so that other agents can take over.
 """
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import re
 from typing import List, Tuple
 
 from .base import AgentBase
+from sqlalchemy.exc import ProgrammingError
 from src.database.db_manager import get_db
 
 
@@ -40,24 +41,37 @@ class ProductLookupAgent(AgentBase):
         # Extract potential query terms by taking words longer than 3 letters
         tokens = re.findall(r"\b\w{4,}\b", user_request.lower())
         q = " ".join(tokens)
-        q_esc = q.replace("'", "''")
-        if q_esc:
-            sql = f"""
-                SELECT store, product_name, brand_name
-                FROM app_inventory
-                WHERE product_name ILIKE '%{q_esc}%'
-                   OR brand_name   ILIKE '%{q_esc}%'
+        if q:
+            sql = """
+                SELECT p.product_name, b.brand_name
+                FROM vip_products p
+                LEFT JOIN vip_brands b ON p.vip_brand_id = b.vip_brand_id
+                WHERE p.product_name ILIKE :pattern
+                   OR b.brand_name   ILIKE :pattern
                 LIMIT 5
             """
+            params = {"pattern": f"%{q}%"}
         else:
-            sql = "SELECT store, product_name, brand_name FROM app_inventory LIMIT 5"
+            sql = """
+                SELECT p.product_name, b.brand_name
+                FROM vip_products p
+                LEFT JOIN vip_brands b ON p.vip_brand_id = b.vip_brand_id
+                LIMIT 5
+            """
+            params = None
         logger.debug("Executing SQL: %s", sql)
-        df = get_db().query_df(sql)
+        try:
+            df = get_db().query_df(sql, params)
+        except ProgrammingError:
+            logger.exception("Required tables are missing")
+            return "Inventory data is unavailable."
         if df.empty:
             logger.info("No products found for query: %s", q)
             return "I'm sorry, I couldn't find any matching products."
-        # Format the DataFrame into a human readable list
-        rows = [f"{row.store}: {row.product_name} by {row.brand_name}" for _, row in df.iterrows()]
+        rows = [
+            f"{row.product_name} by {row.brand_name or 'Unknown brand'}"
+            for _, row in df.iterrows()
+        ]
         result = "Here are some products I found:\n" + "\n".join(rows)
         logger.debug("Lookup result: %s", result)
         return result
