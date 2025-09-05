@@ -1,42 +1,19 @@
+import pytest
+
 import scripts.init_db as init_db
-from sqlalchemy import create_engine, text
+from src.database import db_manager
 
 
-def test_load_sql_from_s3_via_cp(monkeypatch):
-    expected_sql = "SELECT 1;"
-
-    def fake_run(cmd, *args, **kwargs):
-        assert cmd == ["aws", "s3", "cp", "s3://bucket/key.sql", "-"]
-        class Res:
-            stdout = expected_sql
-        return Res()
-
-    monkeypatch.setenv("S3_BUCKET", "bucket")
-    monkeypatch.setenv("S3_KEY", "key.sql")
-    monkeypatch.setattr(init_db.subprocess, "run", fake_run)
-
-    sql = init_db._load_sql()
-    assert sql == expected_sql
+@pytest.fixture(autouse=True)
+def reset_db_manager():
+    db_manager._GLOBAL_DB = None
+    yield
+    db_manager._GLOBAL_DB = None
 
 
-def test_execute_sql_falls_back_to_sqlalchemy(tmp_path, monkeypatch):
+def test_main_exits_when_table_missing(tmp_path, monkeypatch):
     db_file = tmp_path / "test.db"
-    db_url = f"sqlite:///{db_file}"
-    sql = "CREATE TABLE foo (id INTEGER);"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_file}")
+    with pytest.raises(SystemExit):
+        init_db.main()
 
-    def fake_run(*args, **kwargs):
-        raise FileNotFoundError("psql not found")
-
-    monkeypatch.setattr(init_db.subprocess, "run", fake_run)
-
-    init_db._execute_sql(sql, db_url)
-
-    engine = create_engine(db_url)
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(
-                text("SELECT name FROM sqlite_master WHERE type='table' AND name='foo'")
-            )
-            assert result.first() is not None
-    finally:
-        engine.dispose()
