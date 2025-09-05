@@ -37,10 +37,11 @@ services:
       DB_NAME: ${DB_NAME:-warehouse}
       DB_USER: ${DB_USER:-app}
       DB_PASS: ${DB_PASS:-app_pw}
-      S3_BUCKET: ${S3_BUCKET}
-      S3_KEY: ${S3_KEY}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_KEY: ${S3_KEY:-}
       S3_REGION: ${S3_REGION:-}
       S3_PRESIGNED_URL: ${S3_PRESIGNED_URL:-}
+      SQL_FILE: ${SQL_FILE:-}
       LLM_CONFIG_PATH: /app/src/config/llm_config.yaml
       DATABASE_CONFIG_PATH: /app/src/config/database_config.yaml
     ports:
