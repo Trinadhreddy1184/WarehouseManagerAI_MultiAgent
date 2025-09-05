@@ -1,4 +1,4 @@
-"""Populate the ``inventory_embeddings`` table with vector representations."""
+"""Populate embeddings for products imported from the S3 inventory dump."""
 from __future__ import annotations
 
 import sys
@@ -26,30 +26,33 @@ def main() -> None:
     if register_vector:
         register_vector(db.engine)
     embedder = EmbeddingManager()
-    df = db.query_df("SELECT store, product_name, brand_name FROM app_inventory")
+    df = db.query_df(
+        """
+        SELECT p.id, p.product_name, b.brand_name
+        FROM vip_products p
+        LEFT JOIN vip_brands b ON p.vip_brand_id = b.vip_brand_id
+        WHERE p.product_name IS NOT NULL
+        """
+    )
     if df.empty:
         print("No products to embed")
         return
-    texts = [f"{row.store}: {row.product_name} by {row.brand_name}" for _, row in df.iterrows()]
+    texts = [
+        f"{row.product_name} by {row.brand_name or 'Unknown brand'}"
+        for _, row in df.iterrows()
+    ]
     vectors = embedder.embed_documents(texts)
-    insert = text(
+    update = text(
         """
-        INSERT INTO inventory_embeddings (store, product_name, brand_name, embedding)
-        VALUES (:store, :product_name, :brand_name, :embedding)
+        UPDATE vip_products
+        SET embedding = :embedding
+        WHERE id = :id
         """
     )
     with db.engine.begin() as conn:
         for row, vec in zip(df.itertuples(), vectors):
-            conn.execute(
-                insert,
-                {
-                    "store": row.store,
-                    "product_name": row.product_name,
-                    "brand_name": row.brand_name,
-                    "embedding": vec,
-                },
-            )
-    print(f"Inserted {len(vectors)} embeddings")
+            conn.execute(update, {"id": row.id, "embedding": vec})
+    print(f"Indexed {len(vectors)} product embeddings")
 
 
 if __name__ == "__main__":

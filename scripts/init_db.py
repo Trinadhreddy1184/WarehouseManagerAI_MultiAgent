@@ -1,15 +1,11 @@
 """Initialise the application database.
 
-This script creates the core tables required by the app and optionally
-loads seed data from a SQL file.  The SQL can be supplied via:
-
-- An S3 bucket/key specified by the environment variables ``S3_BUCKET`` and
-  ``S3_KEY``.
-- A pre‑signed URL in ``S3_PRESIGNED_URL``.
-- A local path provided through ``SQL_FILE`` (defaults to ``data/init.sql``).
-
-If none of these are supplied the script simply ensures that the
-``app_inventory`` table exists.
+This script creates the core tables required by the app and loads seed data
+from the SQL dump supplied with the liquor and wine inventory.  The dump must
+be sourced from S3 – either streamed directly using ``S3_BUCKET`` and
+``S3_KEY`` or by providing the path to a local copy via ``SQL_FILE``.  If no
+SQL source is provided the script will fail rather than creating placeholder
+tables.
 """
 from __future__ import annotations
 
@@ -19,7 +15,6 @@ import subprocess
 from pathlib import Path
 
 import logging
-import requests
 
 # Ensure the src package is on the Python path when executed as a script
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,7 +25,7 @@ if str(SRC) not in sys.path:
 from config.logging_config import setup_logging  # noqa: E402
 from database.db_manager import get_db  # noqa: E402  (import after path tweak)
 
-from sqlalchemy import create_engine, text  # noqa: E402
+from sqlalchemy import create_engine  # noqa: E402
 try:  # Optional dependency for pgvector
     from pgvector.sqlalchemy import register_vector  # type: ignore  # noqa: E402
 except Exception:  # pragma: no cover - optional dependency
@@ -40,11 +35,10 @@ except Exception:  # pragma: no cover - optional dependency
 logger = logging.getLogger(__name__)
 
 def _load_sql() -> str:
-    """Load SQL statements from S3, a URL or a local file."""
+    """Load SQL statements from S3 or a local file copied from S3."""
     bucket = os.getenv("S3_BUCKET")
     key = os.getenv("S3_KEY")
-    presigned = os.getenv("S3_PRESIGNED_URL")
-    local_path = os.getenv("SQL_FILE", str(ROOT / "data" / "init.sql"))
+    local_path = os.getenv("SQL_FILE")
 
     if bucket and key:
         logger.info("Loading SQL from S3 bucket=%s key=%s", bucket, key)
@@ -61,17 +55,7 @@ def _load_sql() -> str:
             logger.exception("Failed to load SQL from S3: %s", exc)
             raise
 
-    if presigned:
-        logger.info("Loading SQL from presigned URL")
-        try:
-            resp = requests.get(presigned, timeout=30)
-            resp.raise_for_status()
-            return resp.text
-        except Exception as exc:
-            logger.exception("Failed to load SQL from URL: %s", exc)
-            raise
-
-    if os.path.exists(local_path):
+    if local_path and os.path.exists(local_path):
         logger.info("Loading SQL from local file %s", local_path)
         try:
             with open(local_path, "r", encoding="utf-8") as f:
@@ -80,14 +64,9 @@ def _load_sql() -> str:
             logger.exception("Failed to read SQL file %s: %s", local_path, exc)
             raise
 
-    logger.warning("No SQL source provided; using minimal schema")
-    return """
-    CREATE TABLE IF NOT EXISTS app_inventory (
-        store TEXT,
-        product_name TEXT,
-        brand_name TEXT
-    );
-    """
+    raise FileNotFoundError(
+        "No SQL source provided; set S3_BUCKET/S3_KEY or SQL_FILE to the dump from S3"
+    )
 
 
 def _execute_sql(sql: str, db_url: str) -> None:
@@ -127,16 +106,6 @@ def _execute_sql(sql: str, db_url: str) -> None:
     finally:
         engine.dispose()
 
-
-def _index_embeddings() -> None:
-    """Populate the ``inventory_embeddings`` table with vector representations."""
-    try:
-        from . import index_embeddings  # type: ignore
-    except Exception:  # pragma: no cover - when run as script
-        import index_embeddings  # type: ignore
-    index_embeddings.main()
-
-
 def main() -> None:
     setup_logging()
     logger.info("Starting database initialisation")
@@ -144,20 +113,9 @@ def main() -> None:
         db = get_db()
         sql = _load_sql()
         _execute_sql(sql, db.url)
-        # Ensure pgvector extension and embedding table exist
         db.execute("CREATE EXTENSION IF NOT EXISTS vector")
-        db.execute(
-            """
-            CREATE TABLE IF NOT EXISTS inventory_embeddings (
-                id BIGSERIAL PRIMARY KEY,
-                store TEXT,
-                product_name TEXT,
-                brand_name TEXT,
-                embedding vector(1536)
-            );
-            """
-        )
-        _index_embeddings()
+        # Verify that core tables from the dump are present
+        db.query_df("SELECT 1 FROM vip_products LIMIT 1")
     except Exception:
         logger.exception("Database initialisation failed")
         sys.exit(1)

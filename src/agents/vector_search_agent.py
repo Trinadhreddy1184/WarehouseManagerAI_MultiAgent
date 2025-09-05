@@ -40,9 +40,10 @@ class VectorSearchAgent(AgentBase):
         embedding = self.embedder.embed_query(user_request)
         sql = text(
             """
-            SELECT store, product_name, brand_name
-            FROM inventory_embeddings
-            ORDER BY embedding <#> :embedding
+            SELECT p.product_name, b.brand_name
+            FROM vip_products p
+            LEFT JOIN vip_brands b ON p.vip_brand_id = b.vip_brand_id
+            ORDER BY p.embedding <#> :embedding
             LIMIT :k
             """
         )
@@ -51,6 +52,8 @@ class VectorSearchAgent(AgentBase):
         if not rows:
             logger.info("Vector search found no matches; falling back to LLM without context")
             return self.llm_manager.generate(user_request, chat_history)
-        context_lines = [f"{r.store}: {r.product_name} by {r.brand_name}" for r in rows]
+        context_lines = [
+            f"{r.product_name} by {r.brand_name or 'Unknown brand'}" for r in rows
+        ]
         context = "\n".join(context_lines)
         return self.llm_manager.generate(user_request, chat_history, context=context)
