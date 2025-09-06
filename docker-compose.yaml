@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   db:
     # Explicitly pin to the latest pgvector image; the pg16 tag does not exist
