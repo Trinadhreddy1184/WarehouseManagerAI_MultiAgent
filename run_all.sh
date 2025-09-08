@@ -39,7 +39,17 @@ if [ -n "${SQL_FILE:-}" ]; then
   done
 
   echo "Importing SQL dump into database…"
-  docker-compose exec -T db psql -v ON_ERROR_STOP=1 -U "${DB_USER:-app}" -d "${DB_NAME:-warehouse}" < "$SQL_FILE"
+  if grep -qi "transaction_timeout" "$SQL_FILE"; then
+    echo "Filtering unsupported transaction_timeout setting…"
+    docker-compose exec -T db psql -v ON_ERROR_STOP=1 -U "${DB_USER:-app}" -d "${DB_NAME:-warehouse}" < <(sed '/transaction_timeout/d' "$SQL_FILE")
+  else
+    docker-compose exec -T db psql -v ON_ERROR_STOP=1 -U "${DB_USER:-app}" -d "${DB_NAME:-warehouse}" < "$SQL_FILE"
+  fi
+
+  echo "Waiting for database to restart after import…"
+  until docker-compose exec -T db pg_isready -U "${DB_USER:-app}" -d "${DB_NAME:-warehouse}" >/dev/null 2>&1; do
+    sleep 1
+  done
 
   echo "Verifying imported tables…"
   docker-compose exec -T db psql -U "${DB_USER:-app}" -d "${DB_NAME:-warehouse}" -c "SELECT COUNT(*) FROM vip_products LIMIT 1" >/dev/null
