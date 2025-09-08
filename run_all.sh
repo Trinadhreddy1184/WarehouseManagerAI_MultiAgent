@@ -49,6 +49,7 @@ if [ -n "${SQL_FILE:-}" ]; then
     echo "Table check failed, retrying in 2s…"
     sleep 2
   done
+
 fi
 
 echo "Starting application…"
