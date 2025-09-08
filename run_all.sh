@@ -38,23 +38,26 @@ if [ -n "${SQL_FILE:-}" ]; then
     sleep 1
   done
 
+  echo "Resetting database…"
+  docker-compose exec -T db psql -v ON_ERROR_STOP=1 -U "${DB_USER:-app}" -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DB_NAME:-warehouse}';" || true
+  docker-compose exec -T db psql -v ON_ERROR_STOP=1 -U "${DB_USER:-app}" -d postgres -c "DROP DATABASE IF EXISTS ${DB_NAME:-warehouse};"
+  docker-compose exec -T db psql -v ON_ERROR_STOP=1 -U "${DB_USER:-app}" -d postgres -c "CREATE DATABASE ${DB_NAME:-warehouse} OWNER ${DB_USER:-app};"
+  docker-compose exec -T db psql -v ON_ERROR_STOP=1 -U "${DB_USER:-app}" -d "${DB_NAME:-warehouse}" -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA IF NOT EXISTS public AUTHORIZATION ${DB_USER:-app}; GRANT ALL ON SCHEMA public TO ${DB_USER:-app};"
+  docker-compose exec -T db psql -v ON_ERROR_STOP=1 -U "${DB_USER:-app}" -d "${DB_NAME:-warehouse}" -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+  SANITIZED=$(mktemp)
+  echo "Sanitizing SQL dump…"
+  sed -E \
+    -e "/^[[:space:]]*SET[[:space:]]+[a-z_]*timeout[[:space:]]*=/Id" \
+    -e "/pg_catalog\\.set_config\('.*timeout'/Id" \
+    -e "/CRUNCHY|crunchy_/Id" \
+    -e "/^[[:space:]]*ALTER[[:space:]]+(TABLE|SEQUENCE|VIEW|FUNCTION|SCHEMA)[[:space:]].*OWNER TO[[:space:]]/Id" \
+    -e "/^[[:space:]]*(GRANT|REVOKE)[[:space:]]+/Id" \
+    "$SQL_FILE" > "$SANITIZED"
+
   echo "Importing SQL dump into database…"
-  if grep -qi "transaction_timeout" "$SQL_FILE"; then
-    echo "Filtering unsupported transaction_timeout setting…"
-    docker-compose exec -T db psql -v ON_ERROR_STOP=1 -U "${DB_USER:-app}" -d "${DB_NAME:-warehouse}" < <(sed '/transaction_timeout/d' "$SQL_FILE")
-  else
-    docker-compose exec -T db psql -v ON_ERROR_STOP=1 -U "${DB_USER:-app}" -d "${DB_NAME:-warehouse}" < "$SQL_FILE"
-  fi
-
-  echo "Waiting for database to restart after import…"
-  until docker-compose exec -T db pg_isready -U "${DB_USER:-app}" -d "${DB_NAME:-warehouse}" >/dev/null 2>&1; do
-    sleep 1
-  done
-
-  echo "Waiting for database to restart after import…"
-  until docker-compose exec -T db pg_isready -U "${DB_USER:-app}" -d "${DB_NAME:-warehouse}" >/dev/null 2>&1; do
-    sleep 1
-  done
+  docker-compose exec -T db psql -v ON_ERROR_STOP=1 -U "${DB_USER:-app}" -d "${DB_NAME:-warehouse}" --single-transaction < "$SANITIZED"
+  rm -f "$SANITIZED"
 
   echo "Verifying imported tables…"
   docker-compose exec -T db psql -U "${DB_USER:-app}" -d "${DB_NAME:-warehouse}" -c "SELECT COUNT(*) FROM vip_products LIMIT 1" >/dev/null

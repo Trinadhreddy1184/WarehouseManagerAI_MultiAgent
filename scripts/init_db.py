@@ -19,6 +19,7 @@ if str(SRC) not in sys.path:
 
 from config.logging_config import setup_logging  # noqa: E402
 from database.db_manager import get_db  # noqa: E402  (import after path tweak)
+import scripts.index_embeddings as index_embeddings  # noqa: E402
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,9 @@ def main() -> None:
         logger.exception("Database initialisation failed")
         sys.exit(1)
     logger.info("Database initialisation complete")
+
+    logger.info("Indexing product embeddings")
+    index_embeddings.main()
 
 
 
