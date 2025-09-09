@@ -1,77 +1,187 @@
-"""Agent specialising in simple product lookups.
-
-Given a user request, this agent attempts to parse out product or brand names
-and searches the imported ``vip_products`` and ``vip_brands`` tables for
-matches. If there are no obvious product terms in the prompt the agent assigns
-itself a low score so that other agents can take over.
-"""
-from __future__ import annotations
+# src/agents/product_lookup_agent.py
 
 import logging
 import re
-from typing import List, Tuple
+from typing import Optional, List
 
-from .base import AgentBase
 from sqlalchemy.exc import ProgrammingError
-from src.database.db_manager import get_db
 
+from .base_agent import BaseAgent
+from src.database.db_manager import get_db
 
 logger = logging.getLogger(__name__)
 
 
-class ProductLookupAgent(AgentBase):
-    """Return product information from the database if the query mentions inventory."""
+class ProductLookupAgent(BaseAgent):
+    """
+    Looks up products/brands from the relational inventory using the unified view `app_inventory`.
+    - Supports simple keyword search on product_name / brand_name.
+    - Supports optional `store <id|name>` filter, e.g. "gin in store 2".
+    - Supports count queries, e.g. "how many products in store 1?" or "count gin items".
+    Returns either a short list (up to 5 rows) or a single sentence with the total.
+    """
 
-    # Keywords that suggest the user is asking about product availability
-    KEYWORDS = [
-        "product", "brand", "stock", "inventory", "availability", "price"
+    NAME = "product_lookup"
+
+    # Keywords that suggest this agent is relevant
+    _KEYWORDS: List[str] = [
+        "product",
+        "brand",
+        "sku",
+        "item",
+        "stock",
+        "inventory",
+        "have",
+        "store",   # important for store-scoped queries
+        "price",
+        "available",
+        "availability",
     ]
 
-    def score_request(self, user_request: str, chat_history: List[Tuple[str, str]]) -> float:
-        # Very naive scoring: count keyword occurrences
-        lower = user_request.lower()
-        hits = sum(1 for kw in self.KEYWORDS if kw in lower)
+    # Very light stopword list for extracting a fuzzy pattern from free text
+    _STOPWORDS = {
+        "how", "many", "much", "count", "items", "products", "inventory", "stock",
+        "do", "we", "you", "they", "is", "are", "in", "at", "on", "of", "for",
+        "to", "and", "or", "the", "a", "an", "any", "show", "list", "find",
+        "brand", "brands", "product", "sku", "skus", "available", "availability",
+        "store", "stores", "have", "has", "with", "by", "from", "please",
+    }
 
-        score = min(1.0, hits / len(self.KEYWORDS)) if hits else 0.0
-        logger.debug("ProductLookupAgent score=%s for request=%s", score, user_request)
-        # Normalize to [0,1]; at least 0.0 if no hits
-        return score
+    def name(self) -> str:
+        return self.NAME
 
-    def handle(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
-        # Extract potential query terms by taking words longer than 3 letters
-        tokens = re.findall(r"\b\w{4,}\b", user_request.lower())
-        q = " ".join(tokens)
-        if q:
-            sql = """
-                SELECT p.product_name, b.brand_name
-                FROM vip_products p
-                LEFT JOIN vip_brands b ON p.vip_brand_id = b.vip_brand_id
-                WHERE p.product_name ILIKE :pattern
-                   OR b.brand_name   ILIKE :pattern
-                LIMIT 5
-            """
-            params = {"pattern": f"%{q}%"}
-        else:
-            sql = """
-                SELECT p.product_name, b.brand_name
-                FROM vip_products p
-                LEFT JOIN vip_brands b ON p.vip_brand_id = b.vip_brand_id
-                LIMIT 5
-            """
-            params = None
-        logger.debug("Executing SQL: %s", sql)
+    # --- Agent routing signal -------------------------------------------------
+
+    def score_request(self, user_request: str) -> float:
+        """
+        Heuristic score: proportional to number of inventory-related keywords present.
+        """
+        text = user_request.lower()
+        score = sum(1 for kw in self._KEYWORDS if kw in text)
+        # normalize to [0,1] (cap after 5 matches)
+        return min(score / 5.0, 1.0)
+
+    # --- Core handler ---------------------------------------------------------
+
+    def handle(self, user_request: str) -> str:
+        """
+        Execute a lookup against the `app_inventory` view.
+
+        app_inventory expected columns used here:
+          - store (TEXT, may be NULL)
+          - product_name (TEXT)
+          - brand_name (TEXT)
+        """
+        user_request = (user_request or "").strip()
+        if not user_request:
+            return "Please tell me what product or brand to look up."
+
+        # Extract store filter like "store 2" / "store abc"
+        store_match = re.search(r"\bstore\s+([A-Za-z0-9_\-]+)\b", user_request, flags=re.IGNORECASE)
+        store_filter = store_match.group(1) if store_match else None
+
+        # Detect a count query
+        count_query = bool(
+            re.search(r"\bhow\s+many\b", user_request, flags=re.IGNORECASE)
+            or re.search(r"\bcount\b", user_request, flags=re.IGNORECASE)
+        )
+
+        # Build a fuzzy search pattern from remaining content
+        q = self._extract_query_pattern(user_request, store_filter)
+
+        # Build SQL
+        if q or store_filter:
+            sql = "SELECT COUNT(*) AS total FROM app_inventory" if count_query \
+                  else "SELECT store, product_name, brand_name FROM app_inventory"
+
+            conditions = []
+            params = {}
+
+            if q:
+                conditions.append("(product_name ILIKE :pattern OR brand_name ILIKE :pattern)")
+                params["pattern"] = f"%{q}%"
+
+            if store_filter:
+                conditions.append("store ILIKE :store_pattern")
+                params["store_pattern"] = f"%{store_filter}%"
+
+            if conditions:
+                sql += " WHERE " + " AND ".join(conditions)
+
+            if not count_query:
+                sql += " LIMIT 5"
+
+            logger.debug("ProductLookupAgent SQL: %s | params=%s", sql, params)
+
+            try:
+                df = get_db().query_df(sql, params)
+            except ProgrammingError:
+                logger.exception("Required tables/view are missing (expected `app_inventory`).")
+                return "Inventory data is unavailable."
+
+            if df.empty:
+                logger.info("No results for query pattern=%r store=%r", q, store_filter)
+                return "I couldn't find any matching products."
+
+            if count_query:
+                total = int(df.iloc[0]["total"])
+                if store_filter and q:
+                    return f'Store {store_filter} has {total} items matching "{q}".'
+                elif store_filter:
+                    return f"Store {store_filter} has {total} items."
+                elif q:
+                    return f'There are {total} items matching "{q}".'
+                else:
+                    return f"There are {total} items in the inventory."
+            else:
+                rows = [
+                    f"{(row.get('store') or 'Unknown store')}: "
+                    f"{row.get('product_name') or 'Unknown product'} by "
+                    f"{row.get('brand_name') or 'Unknown brand'}"
+                    for _, row in df.iterrows()
+                ]
+                return "Here are some products I found:\n" + "\n".join(rows)
+
+        # No query terms at all: show a small sample to guide the user
         try:
-            df = get_db().query_df(sql, params)
+            df = get_db().query_df(
+                "SELECT store, product_name, brand_name FROM app_inventory LIMIT 5", None
+            )
         except ProgrammingError:
-            logger.exception("Required tables are missing")
+            logger.exception("Required tables/view are missing (expected `app_inventory`).")
             return "Inventory data is unavailable."
+
         if df.empty:
-            logger.info("No products found for query: %s", q)
-            return "I'm sorry, I couldn't find any matching products."
+            return "I couldn't find any inventory data yet."
+
         rows = [
-            f"{row.product_name} by {row.brand_name or 'Unknown brand'}"
+            f"{(row.get('store') or 'Unknown store')}: "
+            f"{row.get('product_name') or 'Unknown product'} by "
+            f"{row.get('brand_name') or 'Unknown brand'}"
             for _, row in df.iterrows()
         ]
-        result = "Here are some products I found:\n" + "\n".join(rows)
-        logger.debug("Lookup result: %s", result)
-        return result
+        return "Here are some products I found:\n" + "\n".join(rows)
+
+    # --- Helpers --------------------------------------------------------------
+
+    def _extract_query_pattern(self, text: str, store_filter: Optional[str]) -> Optional[str]:
+        """
+        Extract a lightweight fuzzy pattern from the user request,
+        excluding obvious stopwords and 'store <x>' mention.
+        """
+        # remove 'store X' segment from text to avoid polluting pattern
+        if store_filter:
+            text = re.sub(rf"\bstore\s+{re.escape(store_filter)}\b", " ", text, flags=re.IGNORECASE)
+
+        # tokenization (very light)
+        tokens = re.findall(r"[A-Za-z0-9_\-]+", text.lower())
+
+        keywords = [t for t in tokens if t not in self._STOPWORDS and len(t) > 2]
+        if not keywords:
+            return None
+
+        # Join first few keywords into a single fuzzy pattern
+        # (This is intentionally simple; the DB uses ILIKE on product_name/brand_name)
+        pattern = " ".join(keywords[:5])
+        return pattern or None
+

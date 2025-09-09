@@ -1,6 +1,36 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.so
+*.egg-info/
+build/
+dist/
+
+# Virtual envs & IDE
+.venv/
+.vscode/
+.idea/
+
+# Secrets / local env
 .env
+*.env
 .env.*
+configs/Embeddings/*.yaml
+!configs/Embeddings/*.template.yaml
+
+# Runtime & logs
+logs/
+tmp/
+nohup.out
 *.log
-.DS_Store
+
+# Data / large blobs (prefer S3 or LFS)
+*.zip
+*.tar*
+*.csv
+*.parquet
+*.db
+*.sqlite*
+*.dump
+*.bak
+data/
