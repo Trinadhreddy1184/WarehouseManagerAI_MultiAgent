@@ -1,18 +1,15 @@
-# src/agents/product_lookup_agent.py
-
 import logging
 import re
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from sqlalchemy.exc import ProgrammingError
 
-from .base_agent import BaseAgent
+from .base import AgentBase
 from src.database.db_manager import get_db
 
 logger = logging.getLogger(__name__)
 
-
-class ProductLookupAgent(BaseAgent):
+class ProductLookupAgent(AgentBase):
     """
     Looks up products/brands from the relational inventory using the unified view `app_inventory`.
     - Supports simple keyword search on product_name / brand_name.
@@ -52,7 +49,7 @@ class ProductLookupAgent(BaseAgent):
 
     # --- Agent routing signal -------------------------------------------------
 
-    def score_request(self, user_request: str) -> float:
+    def score_request(self, user_request: str, chat_history: List[Tuple[str, str]]) -> float:
         """
         Heuristic score: proportional to number of inventory-related keywords present.
         """
@@ -63,7 +60,7 @@ class ProductLookupAgent(BaseAgent):
 
     # --- Core handler ---------------------------------------------------------
 
-    def handle(self, user_request: str) -> str:
+    def handle(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
         """
         Execute a lookup against the `app_inventory` view.
 
