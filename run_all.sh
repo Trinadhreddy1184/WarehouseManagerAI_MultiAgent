@@ -176,3 +176,9 @@ docker exec -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
 
 log "✅ Postgres in Docker is ready, with grants/owners stripped (no extra roles needed)."
 
+# At the bottom of run_all.sh, after database setup:
+log "Launching Streamlit UI..."
+pkill -f "streamlit run" 2>/dev/null || true
+streamlit run src/ui/app.py --server.port 8501 --server.address 0.0.0.0
+
+

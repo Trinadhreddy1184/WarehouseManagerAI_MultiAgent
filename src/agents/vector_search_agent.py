@@ -1,59 +1,98 @@
-"""Agent that performs semantic product search using pgvector."""
-from __future__ import annotations
-
 import logging
 from typing import List, Tuple
-
-from sqlalchemy import text
-try:  # Optional dependency for pgvector
-    from pgvector.sqlalchemy import register_vector  # type: ignore
-except Exception:  # pragma: no cover - import fallback
-    register_vector = None  # type: ignore
-
 from .base import AgentBase
-from src.database.db_manager import get_db
-from src.llm.embeddings import EmbeddingManager
 from src.llm.manager import LLMManager
+from src.database.db_manager import get_db
+from sqlalchemy import event
+from pgvector.psycopg2 import register_vector
 
 logger = logging.getLogger(__name__)
 
-
 class VectorSearchAgent(AgentBase):
-    """Retrieve similar products via embeddings and answer with context."""
+    """
+    Agent performing semantic similarity search on product embeddings stored in the database.
+    """
+    NAME = "vector_search"
 
-    def __init__(self, llm_manager: LLMManager, top_k: int = 5) -> None:
+    def __init__(self, llm_manager: LLMManager) -> None:
         self.llm_manager = llm_manager
-        self.embedder = EmbeddingManager()
+        # Initialize DB connection and ensure pgvector is registered on connect
         self.db = get_db()
-        if register_vector:
-            register_vector(self.db.engine)
-        else:  # pragma: no cover - dependency missing
-            logger.warning("pgvector package not installed; VectorSearchAgent disabled")
-        self.top_k = top_k
+        try:
+            engine = self.db.engine
+        except AttributeError:
+            engine = getattr(self.db, "_db").engine
+        # Register the pgvector adapter on every new DB connection
+        event.listen(engine, "connect", lambda conn, rec: register_vector(conn))
+        logger.debug("VectorSearchAgent initialized with pgvector adapter registered.")
 
     def score_request(self, user_request: str, chat_history: List[Tuple[str, str]]) -> float:
-        # Provide a moderate score so this agent is tried before the general chat agent
-        return 0.6
+        """
+        Return a relevance score for this agent.  Lower priority if the query
+        contains product/brand keywords (to let the ProductLookupAgent handle them).
+        Otherwise return a baseline score.
+        """
+        text = (user_request or "").lower()
+        from .product_lookup_agent import ProductLookupAgent
+        if any(keyword in text for keyword in ProductLookupAgent._KEYWORDS):
+            # De-prioritize queries that look like simple product lookups
+            return 0.0
+        # Baseline score for general semantic queries (catch-all, like GeneralChatAgent)
+        return 0.5  # same baseline used by GeneralChatAgent:contentReference[oaicite:6]{index=6}
 
     def handle(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
-        logger.info("VectorSearchAgent handling request")
-        embedding = self.embedder.embed_query(user_request)
-        sql = text(
-            """
-            SELECT p.product_name, b.brand_name
-            FROM vip_products p
-            LEFT JOIN vip_brands b ON p.vip_brand_id = b.vip_brand_id
-            ORDER BY p.embedding <#> :embedding
-            LIMIT :k
-            """
-        )
-        with self.db.engine.connect() as conn:
-            rows = conn.execute(sql, {"embedding": embedding, "k": self.top_k}).fetchall()
-        if not rows:
-            logger.info("Vector search found no matches; falling back to LLM without context")
+        """
+        Compute the query embedding and perform a pgvector similarity search in vip_products.
+        """
+        text = (user_request or "").strip()
+        if not text:
+            return "What product or feature are you interested in?"
+
+        # Compute embedding via the Bedrock embedding model
+        try:
+            embeddings = self.llm_manager.get_embedding()
+            query_vector = embeddings.embed_query(text)
+        except Exception as e:
+            logger.exception("Failed to compute embedding: %s", e)
+            return "I'm sorry, I cannot process that request right now."
+
+        # Perform vector similarity search in the database
+        sql = """
+            SELECT
+                COALESCE(NULLIF(TRIM(p.consumer_product_name), ''), TRIM(p.product_name)) AS product_name,
+                COALESCE(NULLIF(TRIM(b.consumer_brand_name), ''), TRIM(b.brand_name)) AS brand_name
+            FROM vip_products AS p
+            LEFT JOIN vip_brands AS b ON p.vip_brand_id = b.vip_brand_id
+            ORDER BY p.embedding <-> :vector
+            LIMIT 5
+        """
+        try:
+            df = self.db.query_df(sql, {"vector": query_vector})
+        except Exception as e:
+            logger.exception("Vector search query failed: %s", e)
+            # On failure, fallback to LLM-based answer
             return self.llm_manager.generate(user_request, chat_history)
-        context_lines = [
-            f"{r.product_name} by {r.brand_name or 'Unknown brand'}" for r in rows
-        ]
-        context = "\n".join(context_lines)
-        return self.llm_manager.generate(user_request, chat_history, context=context)
+
+        # If no rows found, fallback to LLM reasoning
+        if df.empty:
+            logger.info("No vector search results for query: %s", text)
+            return self.llm_manager.generate(user_request, chat_history)
+
+        # Format results into a user-friendly response
+        products = []
+        for _, row in df.iterrows():
+            name = row.get("product_name") or "Unknown product"
+            brand = row.get("brand_name")
+            if brand:
+                products.append(f"{name} by {brand}")
+            else:
+                products.append(name)
+
+        if not products:
+            # As a last resort, use LLM
+            return self.llm_manager.generate(user_request, chat_history)
+        if len(products) == 1:
+            return f"I found this product: {products[0]}"
+        # List multiple candidates
+        return "Here are some products you might be interested in:\n" + "\n".join(f"- {p}" for p in products)
+

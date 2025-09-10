@@ -1,6 +1,5 @@
 import logging
 from typing import List, Tuple
-
 import boto3
 from src.agents.base import AgentBase
 from src.database.db_manager import get_db
@@ -8,27 +7,25 @@ from src.llm.manager import LLMManager
 
 logger = logging.getLogger(__name__)
 
-
 class SqlQueryAgent(AgentBase):
     """
     Use the Bedrock LLM to generate a SQL SELECT and execute it safely
-    against the warehouse database (preferring the `app_inventory` view).
+    against the warehouse database.
 
     - Only SELECT statements are allowed.
     - If the result is empty, return "No results found."
-    - Formats single-value aggregates nicely; multi-row results are listed.
+    - Formats single-value aggregates nicely; multi-row results are listed as Markdown table.
     """
-
     NAME = "sql_query"
 
     def __init__(self, llm_manager: LLMManager) -> None:
         self.llm_manager = llm_manager
         self.db = get_db()
-        # Reuse Bedrock client from the LLM if available; otherwise build our own
+        # Set up Bedrock client, reuse if available
         try:
             self.bedrock_client = self.llm_manager.llm._br  # type: ignore[attr-defined]
         except Exception as e:
-            logger.warning("Bedrock client not found on LLM; creating a new one: %s", e)
+            logger.warning("Bedrock client not found on LLMManager; creating a new one: %s", e)
             region = (
                 self.llm_manager.config.get("bedrock", {}).get("region_name")
                 if hasattr(self.llm_manager, "config")
@@ -40,10 +37,6 @@ class SqlQueryAgent(AgentBase):
         return self.NAME
 
     def score_request(self, user_request: str, chat_history: List[Tuple[str, str]]) -> float:
-        """
-        Return a moderate-high score if the question smells like an
-        analytical/SQL-style question so this agent is tried early.
-        """
         text = (user_request or "").lower()
         triggers = [
             " most ", " least ", " highest ", " lowest ",
@@ -57,20 +50,44 @@ class SqlQueryAgent(AgentBase):
     def handle(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
         logger.info("SqlQueryAgent handling: %s", user_request)
 
-        system_prompt = (
-            "You are a SQL expert for a retail inventory database.\n"
-            "Output ONLY a single SQL SELECT statement (no backticks, no prose).\n"
-            "Prefer the unified view `app_inventory` with columns like:\n"
-            "  store (text), product_name (text), brand_name (text)\n"
-            "You may also use base tables if necessary (e.g., vip_products, vip_brands).\n"
-            "Do not modify data. Do not include comments or explanations."
+        # Introspect the database schema: all tables and columns in public schema
+        try:
+            schema_query = """
+                SELECT table_name, column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                ORDER BY table_name, ordinal_position;
+            """
+            schema_df = self.db.query_df(schema_query, None)
+            tables = {}
+            for table, col in zip(schema_df["table_name"], schema_df["column_name"]):
+                tables.setdefault(table, []).append(col)
+            # Format schema lines
+            schema_lines = []
+            for table, cols in tables.items():
+                cols_list = ", ".join(cols)
+                schema_lines.append(f"{table} ({cols_list})")
+            schema_str = "\n".join(schema_lines)
+        except Exception as e:
+            logger.exception("Failed to retrieve database schema: %s", e)
+            schema_str = ""
+
+        # Build system prompt including schema information
+        system_prompt = "You are a SQL expert for a warehouse inventory database.\n"
+        if schema_str:
+            system_prompt += "The database has the following tables and columns:\n"
+            system_prompt += schema_str + "\n"
+        system_prompt += (
+            "Output ONLY a single SQL SELECT statement (no backticks, no explanations). "
+            "Do not modify or write any data."
         )
+
         messages = [
             {"role": "system", "content": [{"text": system_prompt}]},
             {"role": "user", "content": [{"text": user_request}]},
         ]
 
-        # Call Bedrock Nova to draft the SQL (catching permission issues gracefully)
+        # Call Bedrock LLM to generate the SQL (Nova model)
         try:
             resp = self.bedrock_client.converse(
                 modelId="amazon.nova-pro-v1:0",
@@ -84,42 +101,49 @@ class SqlQueryAgent(AgentBase):
             sql = resp["output"]["message"]["content"][0]["text"].strip()
         except Exception as e:
             logger.exception("Bedrock converse failed: %s", e)
-            return ("I couldn't formulate a query for that yet. "
-                    "Model permissions may be missing; please verify Bedrock access.")
+            return ("I couldn't formulate a query for that request. "
+                    "Please check your AWS Bedrock permissions or try again later.")
 
-        # Safety: allow only SELECTs
+        # Ensure only SELECT queries are allowed
         sql_clean = sql.rstrip(";").strip()
         if not sql_clean.lower().startswith("select"):
-            logger.warning("Generated non-SELECT query; refusing to run: %s", sql_clean)
-            return "I can only run read-only SELECT queries."
+            logger.warning("Generated query is not a SELECT statement: %s", sql_clean)
+            return "I can only execute read-only SELECT queries."
 
-        # Execute
+        # Execute the query
         try:
             df = self.db.query_df(sql_clean, None)
         except Exception as e:
             logger.exception("SQL execution failed: %s\nSQL was: %s", e, sql_clean)
-            return "I couldn't execute the query."
+            err = str(e).lower()
+            if "does not exist" in err:
+                # Likely missing table or column
+                return "I couldn't execute the query: one of the tables or columns was not found."
+            return "I couldn't execute the query due to an error."
 
+        # Check if result is empty
         if df.empty:
             return "No results found."
 
-        # Formatting
+        # Format results
+        # Single value aggregate (1x1)
         if df.shape == (1, 1):
-            # Single cell (likely aggregate)
             col = df.columns[0]
             val = df.iloc[0, 0]
             return f"{col}: **{val}**"
 
+        # Single row with multiple columns -> inline key: value
         if df.shape[0] == 1:
-            # One row, multiple columns → inline key: value pairs
             pairs = [f"{c}: {df.iloc[0][c]}" for c in df.columns]
             return " | ".join(pairs)
 
-        # Multi-row display with header
+        # Multi-row results -> Markdown table (code block with pipes)
         header = " | ".join(str(c) for c in df.columns)
         lines = [" | ".join(str(x) for x in row) for _, row in df.iterrows()]
-        block = "\n".join([header] + lines[:20])  # cap output
+        # Limit number of rows in output for brevity
+        lines_display = lines[:20]
+        table_block = "\n".join([header] + lines_display)
         if len(lines) > 20:
-            block += f"\n... ({len(lines) - 20} more rows)"
-        return "**Results:**\n```\n" + block + "\n```"
+            table_block += f"\n... ({len(lines) - 20} more rows)"
+        return "**Results:**\n```\n" + table_block + "\n```"
 

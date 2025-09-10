@@ -1,90 +1,102 @@
-"""Streamlit front‑end for the multi‑agent retail application."""
-from __future__ import annotations
-
-import os
-import sys
+import os, sys, logging
 from pathlib import Path
-from typing import List, Tuple
-
-import logging
-
 import streamlit as st
 from dotenv import load_dotenv
+import pandas as pd
 
-# Ensure the project root is on the path so ``import src`` works
+# Ensure project root is on the path for imports
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.config.load_config import load_llm_config, load_database_config
-
 from src.config.logging_config import setup_logging
-
 from src.llm.manager import LLMManager
 from src.agents.agent_manager import AgentManager
 
-
+# Initialize logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
+# Load environment variables (e.g. AWS credentials, DB, etc.)
+load_dotenv()
 
-def main() -> None:
-    """Run the Streamlit application."""
-    setup_logging()
+# Configure Streamlit page
+st.set_page_config(page_title="Warehouse Inventory Assistant", layout="wide")
+st.title("Warehouse Inventory Assistant")
 
-    # Load environment variables from a .env file if present
-    load_dotenv()
+# Optional sidebar instructions
+st.sidebar.title("Instructions")
+st.sidebar.info(
+    "Enter your query about the warehouse inventory. "
+    "The assistant will use the inventory database to answer your questions."
+)
 
-    st.set_page_config(page_title="Retail Inventory Chatbot", layout="wide")
-    st.header("Retail Inventory Chatbot")
+# Initialize chat history
+if "chat_history" not in st.session_state:
+    st.session_state["chat_history"] = []  # list of (role, message)
 
-    logger.info("Streamlit app started")
-
-    # Resolve config paths from environment or use defaults
+# Initialize AgentManager (load configs, build LLM and agents) once
+if "agent_manager" not in st.session_state:
     llm_config_path = os.getenv("LLM_CONFIG_PATH", "src/config/llm_config.yaml")
     db_config_path = os.getenv("DATABASE_CONFIG_PATH", "src/config/database_config.yaml")
-
-    # Load configurations
-    logger.debug("Loading LLM config from %s", llm_config_path)
     llm_config = load_llm_config(llm_config_path)
-    logger.debug("Loading DB config from %s", db_config_path)
-    _ = load_database_config(db_config_path)  # currently unused; ensures env vars are loaded
-
-    # Create LLM and agent manager
+    _ = load_database_config(db_config_path)
     llm_manager = LLMManager.from_config(llm_config)
     agent_manager = AgentManager(llm_manager)
+    st.session_state["agent_manager"] = agent_manager
 
-    logger.info("AgentManager and LLMManager initialised")
+# Get user input
+user_input = st.chat_input("Your message:")
 
+if user_input:
+    # Display existing conversation
+    for role, msg in st.session_state["chat_history"]:
+        st.chat_message(role).markdown(msg)
 
-    # Initialise chat history
-    if "chat_history" not in st.session_state:
-        st.session_state["chat_history"]: List[Tuple[str, str]] = []
+    # Append and display new user message
+    st.session_state["chat_history"].append(("user", user_input))
+    st.chat_message("user").markdown(user_input)
 
-    # Prompt input
-    user_input = st.text_input(
-        "Ask a question",
-        placeholder="E.g. What whiskies are in stock?",
-        key="prompt",
-    )
+    # Call the multi-agent system to get a response
+    with st.spinner("Assistant is typing..."):
+        response = st.session_state["agent_manager"].handle_request(
+            user_input, st.session_state["chat_history"]
+        )
 
-    if user_input:
+    # Append assistant response to history
+    st.session_state["chat_history"].append(("assistant", response))
 
-        logger.info("User input received: %s", user_input)
+    # Check if response contains a Markdown table (SQL results)
+    if "```" in response:
+        try:
+            # Extract text inside the first code block
+            table_text = response.split("```")[1]
+        except IndexError:
+            table_text = ""
+        lines = table_text.strip().splitlines()
+        if lines:
+            header = [h.strip() for h in lines[0].split("|")]
+            data_rows = []
+            for row in lines[1:]:
+                if "|" not in row:
+                    continue
+                data_rows.append([cell.strip() for cell in row.split("|")])
+            if data_rows:
+                # Build DataFrame and display as table
+                df = pd.DataFrame(data_rows, columns=header)
+                st.chat_message("assistant").markdown("**Results:**")
+                st.table(df)
+            else:
+                # Fallback to raw response if parsing fails
+                st.chat_message("assistant").markdown(response)
+        else:
+            st.chat_message("assistant").markdown(response)
+    else:
+        # No table in response; just render Markdown
+        st.chat_message("assistant").markdown(response)
+else:
+    # If no new input, just display the existing conversation
+    for role, msg in st.session_state["chat_history"]:
+        st.chat_message(role).markdown(msg)
 
-        with st.spinner("Generating response…"):
-            response = agent_manager.handle_request(user_input, st.session_state["chat_history"])
-        # Append to history
-        st.session_state["chat_history"].append(("user", user_input))
-        st.session_state["chat_history"].append(("assistant", response))
-
-        logger.debug("Assistant response: %s", response)
-
-
-    # Display chat history
-    for role, text in st.session_state.get("chat_history", []):
-        with st.chat_message("assistant" if role != "user" else "user"):
-            st.markdown(text)
-
-
-if __name__ == "__main__":
-    main()
