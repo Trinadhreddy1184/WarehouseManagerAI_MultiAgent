@@ -1,6 +1,7 @@
 import logging
-from typing import List, Tuple
+from typing import Optional, List, Dict, Tuple
 import boto3
+import json
 from src.agents.base import AgentBase
 from src.database.db_manager import get_db
 from src.llm.manager import LLMManager
@@ -50,27 +51,57 @@ class SqlQueryAgent(AgentBase):
     def handle(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
         logger.info("SqlQueryAgent handling: %s", user_request)
 
-        # Introspect the database schema: all tables and columns in public schema
+        # Load database schema from JSON if available, otherwise introspect
+        schema_str = ""
         try:
-            schema_query = """
-                SELECT table_name, column_name
-                FROM information_schema.columns
-                WHERE table_schema = 'public'
-                ORDER BY table_name, ordinal_position;
-            """
-            schema_df = self.db.query_df(schema_query, None)
+            with open("src/database/schema.json", "r") as f:
+                schema_json = json.load(f)
             tables = {}
-            for table, col in zip(schema_df["table_name"], schema_df["column_name"]):
-                tables.setdefault(table, []).append(col)
-            # Format schema lines
+            # Determine format of schema JSON
+            if isinstance(schema_json, dict):
+                if "tables" in schema_json and isinstance(schema_json["tables"], dict):
+                    tables = schema_json["tables"]
+                else:
+                    for table, cols in schema_json.items():
+                        if isinstance(cols, list):
+                            tables.setdefault(table, []).extend(cols)
+                        elif isinstance(cols, dict) and "columns" in cols:
+                            tables.setdefault(table, []).extend(cols["columns"])
+            elif isinstance(schema_json, list):
+                for entry in schema_json:
+                    if isinstance(entry, dict):
+                        table = entry.get("table") or entry.get("name")
+                        columns = entry.get("columns") or entry.get("fields") or []
+                        if table and isinstance(columns, list):
+                            tables.setdefault(table, []).extend(columns)
+            # Build schema lines
             schema_lines = []
             for table, cols in tables.items():
                 cols_list = ", ".join(cols)
                 schema_lines.append(f"{table} ({cols_list})")
             schema_str = "\n".join(schema_lines)
         except Exception as e:
-            logger.exception("Failed to retrieve database schema: %s", e)
-            schema_str = ""
+            logger.exception("Failed to load schema.json: %s", e)
+            # Fallback: introspect the database schema
+            try:
+                schema_query = """
+                    SELECT table_name, column_name
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                    ORDER BY table_name, ordinal_position;
+                """
+                schema_df = self.db.query_df(schema_query, None)
+                tables = {}
+                for table, col in zip(schema_df["table_name"], schema_df["column_name"]):
+                    tables.setdefault(table, []).append(col)
+                schema_lines = []
+                for table, cols in tables.items():
+                    cols_list = ", ".join(cols)
+                    schema_lines.append(f"{table} ({cols_list})")
+                schema_str = "\n".join(schema_lines)
+            except Exception as e2:
+                logger.exception("Failed to retrieve database schema: %s", e2)
+                schema_str = ""
 
         # Build system prompt including schema information
         system_prompt = "You are a SQL expert for a warehouse inventory database.\n"

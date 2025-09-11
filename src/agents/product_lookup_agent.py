@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import Optional, List, Tuple
+from typing import Optional, List, Dict, Tuple
 
 from sqlalchemy.exc import ProgrammingError
 
@@ -17,7 +17,6 @@ class ProductLookupAgent(AgentBase):
     - Supports count queries, e.g. "how many products in store 1?" or "count gin items".
     Returns either a short list (up to 5 rows) or a single sentence with the total.
     """
-
     NAME = "product_lookup"
 
     # Keywords that suggest this agent is relevant
@@ -118,7 +117,7 @@ class ProductLookupAgent(AgentBase):
 
             if df.empty:
                 logger.info("No results for query pattern=%r store=%r", q, store_filter)
-                return "I couldn't find any matching products."
+                return "No products found."
 
             if count_query:
                 total = int(df.iloc[0]["total"])
@@ -149,7 +148,7 @@ class ProductLookupAgent(AgentBase):
             return "Inventory data is unavailable."
 
         if df.empty:
-            return "I couldn't find any inventory data yet."
+            return "No products found."
 
         rows = [
             f"{(row.get('store') or 'Unknown store')}: "

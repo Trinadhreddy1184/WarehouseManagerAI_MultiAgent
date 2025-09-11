@@ -1,12 +1,17 @@
 import logging
-from typing import List, Tuple
+from typing import Optional, List, Dict, Tuple
 from .base import AgentBase
 from src.llm.manager import LLMManager
 from src.database.db_manager import get_db
 from sqlalchemy import event
-from pgvector.psycopg2 import register_vector
 
 logger = logging.getLogger(__name__)
+
+try:
+    from pgvector.psycopg2 import register_vector
+except ImportError:
+    register_vector = None
+    logger.warning("pgvector module not available; vector search disabled.")
 
 class VectorSearchAgent(AgentBase):
     """
@@ -22,9 +27,11 @@ class VectorSearchAgent(AgentBase):
             engine = self.db.engine
         except AttributeError:
             engine = getattr(self.db, "_db").engine
-        # Register the pgvector adapter on every new DB connection
-        event.listen(engine, "connect", lambda conn, rec: register_vector(conn))
-        logger.debug("VectorSearchAgent initialized with pgvector adapter registered.")
+        if register_vector is not None:
+            event.listen(engine, "connect", lambda conn, rec: register_vector(conn))
+            logger.debug("VectorSearchAgent initialized with pgvector adapter registered.")
+        else:
+            logger.warning("pgvector adapter not registered, vector search disabled.")
 
     def score_request(self, user_request: str, chat_history: List[Tuple[str, str]]) -> float:
         """
@@ -38,7 +45,7 @@ class VectorSearchAgent(AgentBase):
             # De-prioritize queries that look like simple product lookups
             return 0.0
         # Baseline score for general semantic queries (catch-all, like GeneralChatAgent)
-        return 0.5  # same baseline used by GeneralChatAgent:contentReference[oaicite:6]{index=6}
+        return 0.5  # same baseline used by GeneralChatAgent
 
     def handle(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
         """
@@ -54,7 +61,7 @@ class VectorSearchAgent(AgentBase):
             query_vector = embeddings.embed_query(text)
         except Exception as e:
             logger.exception("Failed to compute embedding: %s", e)
-            return "I'm sorry, I cannot process that request right now."
+            return "No vector results found."
 
         # Perform vector similarity search in the database
         sql = """
@@ -70,13 +77,12 @@ class VectorSearchAgent(AgentBase):
             df = self.db.query_df(sql, {"vector": query_vector})
         except Exception as e:
             logger.exception("Vector search query failed: %s", e)
-            # On failure, fallback to LLM-based answer
-            return self.llm_manager.generate(user_request, chat_history)
+            return "No vector results found."
 
-        # If no rows found, fallback to LLM reasoning
+        # If no rows found, fallback
         if df.empty:
             logger.info("No vector search results for query: %s", text)
-            return self.llm_manager.generate(user_request, chat_history)
+            return "No vector results found."
 
         # Format results into a user-friendly response
         products = []
@@ -89,8 +95,7 @@ class VectorSearchAgent(AgentBase):
                 products.append(name)
 
         if not products:
-            # As a last resort, use LLM
-            return self.llm_manager.generate(user_request, chat_history)
+            return "No vector results found."
         if len(products) == 1:
             return f"I found this product: {products[0]}"
         # List multiple candidates

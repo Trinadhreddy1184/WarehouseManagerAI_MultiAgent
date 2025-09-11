@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd /opt/WarehouseManagerAI
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
 
 # Load env exactly as you requested
 if [ -f .env ]; then
@@ -176,9 +180,21 @@ docker exec -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
 
 log "✅ Postgres in Docker is ready, with grants/owners stripped (no extra roles needed)."
 
+log "Exporting database schema to src/database/schema.json"
+docker exec -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+  psql -U "$DB_USER" -d "$DB_NAME" -t -c \
+  "SELECT jsonb_pretty(jsonb_object_agg(table_name, columns)) FROM \
+   (SELECT table_name, jsonb_agg(column_name ORDER BY ordinal_position) AS columns \
+    FROM information_schema.columns \
+    WHERE table_schema='public' \
+    GROUP BY table_name) AS schema_json;" \
+  > src/database/schema.json
+
+
+
 # At the bottom of run_all.sh, after database setup:
 log "Launching Streamlit UI..."
 pkill -f "streamlit run" 2>/dev/null || true
-streamlit run src/ui/app.py --server.port 8501 --server.address 0.0.0.0
-
-
+nohup streamlit run src/ui/app.py --server.address 0.0.0.0 --server.port 8501 > app.log 2>&1 &
+sleep 2
+tail -n 200 app.log

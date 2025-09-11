@@ -39,8 +39,8 @@ class AgentManager:
         self.agents: List[AgentBase] = agents or [
             VectorSearchAgent(llm_manager),
             ProductLookupAgent(),
-            GeneralChatAgent(llm_manager),
-            SqlQueryAgent(llm_manager)
+            SqlQueryAgent(llm_manager),
+            GeneralChatAgent(llm_manager)
         ]
         self.evaluator = evaluator or ResponseEvaluator()
         logger.debug(
