@@ -63,18 +63,9 @@ class VectorSearchAgent(AgentBase):
             logger.exception("Failed to compute embedding: %s", e)
             return "No vector results found."
 
-        # Perform vector similarity search in the database
-        sql = """
-            SELECT
-                COALESCE(NULLIF(TRIM(p.consumer_product_name), ''), TRIM(p.product_name)) AS product_name,
-                COALESCE(NULLIF(TRIM(b.consumer_brand_name), ''), TRIM(b.brand_name)) AS brand_name
-            FROM vip_products AS p
-            LEFT JOIN vip_brands AS b ON p.vip_brand_id = b.vip_brand_id
-            ORDER BY p.embedding <-> :vector
-            LIMIT 5
-        """
+        # Perform vector similarity search in the database (with DuckDB fallback support)
         try:
-            df = self.db.query_df(sql, {"vector": query_vector})
+            df = self.db.vector_similarity(query_vector, limit=5)
         except Exception as e:
             logger.exception("Vector search query failed: %s", e)
             return "No vector results found."

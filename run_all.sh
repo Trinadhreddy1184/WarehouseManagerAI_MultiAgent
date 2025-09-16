@@ -33,6 +33,8 @@ die() { echo "❌ $*" >&2; exit 1; }
 
 APP_DIR="/opt/WarehouseManagerAI"
 VIEWS_SQL="${APP_DIR}/views/999_app_views.sql"
+DUCKDB_SQL_DUMP="${DUCKDB_SQL_DUMP:-$APP_DIR/data/postgres_dump.sql}"
+mkdir -p "$(dirname "$DUCKDB_SQL_DUMP")"
 
 # Pick compose command
 if command -v docker-compose >/dev/null 2>&1; then
@@ -92,17 +94,17 @@ else
 
   if [ -n "${SQL_FILE:-}" ] && [ -f "$SQL_FILE" ]; then
     log "Importing from local file: $SQL_FILE (sanitized grants/owners)"
-    stream_filter < "$SQL_FILE" | docker exec -i -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
-      psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1
+    stream_filter < "$SQL_FILE" > "$DUCKDB_SQL_DUMP"
   elif [ -n "${S3_PRESIGNED_URL:-}" ]; then
     log "Importing from presigned URL (sanitized grants/owners)…"
-    curl -sSL "$S3_PRESIGNED_URL" | stream_filter | docker exec -i -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
-      psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1
+    curl -sSL "$S3_PRESIGNED_URL" | stream_filter > "$DUCKDB_SQL_DUMP"
   else
     log "Importing from s3://$S3_BUCKET/$S3_KEY (sanitized grants/owners)…"
-    aws s3 cp "s3://${S3_BUCKET}/${S3_KEY}" - | stream_filter | docker exec -i -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
-      psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1
+    aws s3 cp "s3://${S3_BUCKET}/${S3_KEY}" - | stream_filter > "$DUCKDB_SQL_DUMP"
   fi
+  log "Sanitized SQL dump written to $DUCKDB_SQL_DUMP for DuckDB fallback."
+  cat "$DUCKDB_SQL_DUMP" | docker exec -i -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+    psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1
   log "Import complete."
 
   # Post-import: normalize ownership & permissions for app user
@@ -169,6 +171,7 @@ fi
 
 # Export DB URL for app
 export DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+export DUCKDB_SQL_DUMP
 log "DATABASE_URL set to: ${DATABASE_URL}"
 
 # Verify
