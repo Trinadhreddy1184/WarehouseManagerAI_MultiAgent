@@ -45,6 +45,10 @@ if "agent_manager" not in st.session_state:
     llm_manager = LLMManager.from_config(llm_config)
     agent_manager = AgentManager(llm_manager)
     st.session_state["agent_manager"] = agent_manager
+    if not llm_manager.is_enabled():
+        st.sidebar.warning(
+            "Language model features are disabled; the assistant will answer using the DuckDB inventory only."
+        )
 
 # Get user input
 user_input = st.chat_input("Your message:")
