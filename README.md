@@ -77,3 +77,9 @@ explicit configuration for LLMs, data sources and runtime environment.
 For Docker users, run `./run_all.sh` to build and start all services.  See
 `docs/architecture.md` for a high‑level overview of the system and detailed
 instructions.
+
+## Troubleshooting
+
+Running on resource-constrained instances? Refer to
+[`docs/troubleshooting.md`](docs/troubleshooting.md) for tips on inspecting and
+reducing memory usage when provisioning the stack on hosts such as `t3.small`.

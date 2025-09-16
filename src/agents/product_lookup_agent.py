@@ -2,7 +2,7 @@ import logging
 import re
 from typing import Optional, List, Dict, Tuple
 
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import ProgrammingError, OperationalError
 
 from .base import AgentBase
 from src.database.db_manager import get_db
@@ -111,8 +111,10 @@ class ProductLookupAgent(AgentBase):
 
             try:
                 df = get_db().query_df(sql, params)
-            except ProgrammingError:
-                logger.exception("Required tables/view are missing (expected `app_inventory`).")
+            except (ProgrammingError, OperationalError):
+                logger.exception(
+                    "Required tables/view are missing (expected `app_inventory`)."
+                )
                 return "Inventory data is unavailable."
 
             if df.empty:
@@ -143,8 +145,10 @@ class ProductLookupAgent(AgentBase):
             df = get_db().query_df(
                 "SELECT store, product_name, brand_name FROM app_inventory LIMIT 5", None
             )
-        except ProgrammingError:
-            logger.exception("Required tables/view are missing (expected `app_inventory`).")
+        except (ProgrammingError, OperationalError):
+            logger.exception(
+                "Required tables/view are missing (expected `app_inventory`)."
+            )
             return "Inventory data is unavailable."
 
         if df.empty:
