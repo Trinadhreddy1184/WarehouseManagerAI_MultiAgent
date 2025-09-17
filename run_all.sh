@@ -42,8 +42,11 @@ mkdir -p "$(dirname "$DUCKDB_SQL_DUMP")"
 
 export DUCKDB_FALLBACK_PATH="$DUCKDB_DB_PATH"
 export DUCKDB_SQL_DUMP
+<<<<<<< HEAD
 : "${DUCKDB_AUTO_SYNC:=0}"
 export DUCKDB_AUTO_SYNC
+=======
+>>>>>>> parent of 0a02353 (Revert "feat: run DuckDB-only workflows and disable LLM features")
 
 # Pick compose command
 if command -v docker-compose >/dev/null 2>&1; then
@@ -107,7 +110,10 @@ python3 <<'PY'
 import os
 import sys
 from pathlib import Path
+<<<<<<< HEAD
 from textwrap import dedent
+=======
+>>>>>>> parent of 0a02353 (Revert "feat: run DuckDB-only workflows and disable LLM features")
 
 ROOT = Path.cwd()
 if str(ROOT / "src") not in sys.path:
@@ -125,6 +131,7 @@ manager = DBManager(
     duckdb_sql_dump_path=dump,
 )
 try:
+<<<<<<< HEAD
     synced = manager.sync_duckdb_backup()
     if not synced:
         print(
@@ -270,6 +277,8 @@ try:
                 + "\n",
                 encoding="utf-8",
             )
+=======
+>>>>>>> parent of 0a02353 (Revert "feat: run DuckDB-only workflows and disable LLM features")
     manager.sync_duckdb_backup()
 finally:
     manager.close()
