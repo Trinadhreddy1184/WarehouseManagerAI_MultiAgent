@@ -270,6 +270,7 @@ try:
                 + "\n",
                 encoding="utf-8",
             )
+    manager.sync_duckdb_backup()
 finally:
     manager.close()
 PY
