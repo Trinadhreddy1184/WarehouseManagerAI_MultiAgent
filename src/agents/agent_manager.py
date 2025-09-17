@@ -36,21 +36,12 @@ class AgentManager:
             Scorer used to judge whether an agent's response is satisfactory.
         """
         self.llm_manager = llm_manager
-        if agents is not None:
-            self.agents = list(agents)
-        else:
-            if self.llm_manager.is_enabled():
-                self.agents = [
-                    VectorSearchAgent(llm_manager),
-                    ProductLookupAgent(),
-                    SqlQueryAgent(llm_manager),
-                    GeneralChatAgent(llm_manager),
-                ]
-            else:
-                logger.info(
-                    "LLM disabled – defaulting to ProductLookupAgent only"
-                )
-                self.agents = [ProductLookupAgent()]
+        self.agents: List[AgentBase] = agents or [
+            VectorSearchAgent(llm_manager),
+            ProductLookupAgent(),
+            SqlQueryAgent(llm_manager),
+            GeneralChatAgent(llm_manager)
+        ]
         self.evaluator = evaluator or ResponseEvaluator()
         logger.debug(
             "AgentManager initialised with agents=%s evaluator_threshold=%s",

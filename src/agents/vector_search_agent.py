@@ -1,10 +1,9 @@
 import logging
-from typing import List, Tuple
+from typing import Optional, List, Dict, Tuple
 from .base import AgentBase
 from src.llm.manager import LLMManager
 from src.database.db_manager import get_db
-
-# from sqlalchemy import event
+from sqlalchemy import event
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +11,7 @@ try:
     from pgvector.psycopg2 import register_vector
 except ImportError:
     register_vector = None
-    logger.info("pgvector module not available; continuing with DuckDB-only mode.")
+    logger.warning("pgvector module not available; vector search disabled.")
 
 class VectorSearchAgent(AgentBase):
     """
@@ -22,21 +21,17 @@ class VectorSearchAgent(AgentBase):
 
     def __init__(self, llm_manager: LLMManager) -> None:
         self.llm_manager = llm_manager
-        # Initialize DB connection; pgvector registration is skipped while using DuckDB only
+        # Initialize DB connection and ensure pgvector is registered on connect
         self.db = get_db()
-        self._enabled = self.llm_manager.is_enabled()
-        if not self._enabled:
-            logger.info(
-                "VectorSearchAgent initialised with LLM disabled; queries will return a placeholder"
-            )
-        # try:
-        #     engine = self.db.engine
-        # except AttributeError:
-        #     engine = getattr(self.db, "_db").engine
-        # if register_vector is not None:
-        #     event.listen(engine, "connect", lambda conn, rec: register_vector(conn))
-        #     logger.debug("VectorSearchAgent initialized with pgvector adapter registered.")
-        logger.info("VectorSearchAgent running with DuckDB backend; pgvector registration disabled.")
+        try:
+            engine = self.db.engine
+        except AttributeError:
+            engine = getattr(self.db, "_db").engine
+        if register_vector is not None:
+            event.listen(engine, "connect", lambda conn, rec: register_vector(conn))
+            logger.debug("VectorSearchAgent initialized with pgvector adapter registered.")
+        else:
+            logger.warning("pgvector adapter not registered, vector search disabled.")
 
     def score_request(self, user_request: str, chat_history: List[Tuple[str, str]]) -> float:
         """
@@ -44,8 +39,6 @@ class VectorSearchAgent(AgentBase):
         contains product/brand keywords (to let the ProductLookupAgent handle them).
         Otherwise return a baseline score.
         """
-        if not self._enabled:
-            return 0.0
         text = (user_request or "").lower()
         from .product_lookup_agent import ProductLookupAgent
         if any(keyword in text for keyword in ProductLookupAgent._KEYWORDS):
@@ -58,11 +51,6 @@ class VectorSearchAgent(AgentBase):
         """
         Compute the query embedding and perform a pgvector similarity search in vip_products.
         """
-        if not self._enabled:
-            return (
-                "Vector search is disabled while the language model is offline. "
-                "Enable the LLM to restore semantic lookups."
-            )
         text = (user_request or "").strip()
         if not text:
             return "What product or feature are you interested in?"

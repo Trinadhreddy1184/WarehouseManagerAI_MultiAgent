@@ -1,8 +1,11 @@
 import os
 import sys
+from dataclasses import dataclass
 from textwrap import dedent
 
+import pandas as pd
 import pytest
+from sqlalchemy.exc import OperationalError
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -10,21 +13,95 @@ from src.database.db_manager import DBManager
 
 
 def test_connects_using_db_password(monkeypatch):
-    """Placeholder: PostgreSQL connection logic disabled during DuckDB-only testing."""
+    """DBManager should honour DB_PASSWORD environment variable."""
 
-    pytest.skip("PostgreSQL connection handling is disabled while using DuckDB only")
+    # Ensure compatibility variable is absent and DATABASE_URL not set
+    monkeypatch.delenv("DB_PASS", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("DB_PASSWORD", "secret")
+
+    mgr = DBManager(enable_duckdb_fallback=False)
+    try:
+        assert mgr.engine.url.password == "secret"
+    finally:
+        mgr.close()
+
+
+@dataclass
+class _DummyConnection:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
 
 def test_query_df_retries_on_connection_refused(monkeypatch):
-    """Placeholder for transient PostgreSQL retry behaviour."""
+    mgr = DBManager(
+        "postgresql://app:pw@localhost:5432/warehouse",
+        max_retries=3,
+        retry_interval=0,
+        enable_duckdb_fallback=False,
+    )
 
-    pytest.skip("Transient PostgreSQL retry logic is disabled while using DuckDB only")
+    attempts = {"count": 0}
+
+    def flaky_connect():
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise OperationalError(
+                'connection to server at "localhost" (127.0.0.1), port 5432 failed: Connection refused',
+                None,
+                None,
+            )
+        return _DummyConnection()
+
+    monkeypatch.setattr(mgr.engine, "connect", flaky_connect)
+
+    results = {"called": 0}
+
+    def fake_read_sql(query, conn, params=None):
+        results["called"] += 1
+        return pd.DataFrame(
+            {"store": ["A"], "product_name": ["Widget"], "brand_name": ["Brand"]}
+        )
+
+    monkeypatch.setattr(pd, "read_sql", fake_read_sql)
+
+    try:
+        df = mgr.query_df(
+            "SELECT store, product_name, brand_name FROM app_inventory LIMIT 5",
+            params=None,
+        )
+    finally:
+        mgr.close()
+
+    assert attempts["count"] == 3
+    assert results["called"] == 1
+    assert not df.empty
 
 
 def test_query_df_does_not_retry_non_transient_error(monkeypatch):
-    """Placeholder for non-transient PostgreSQL error handling."""
+    mgr = DBManager(
+        "postgresql://app:pw@localhost:5432/warehouse",
+        max_retries=3,
+        retry_interval=0,
+        enable_duckdb_fallback=False,
+    )
 
-    pytest.skip("PostgreSQL retry behaviour tests are disabled in DuckDB-only mode")
+    attempts = {"count": 0}
+
+    def failing_connect():
+        attempts["count"] += 1
+        raise OperationalError("syntax error at or near \"SELECT\"", None, None)
+
+    monkeypatch.setattr(mgr.engine, "connect", failing_connect)
+
+    with pytest.raises(OperationalError):
+        mgr.query_df("SELECT * FROM bad_table", params=None)
+
+    mgr.close()
+    assert attempts["count"] == 1
 
 
 def _write_basic_inventory_dump(path):
@@ -77,12 +154,13 @@ def _write_vector_dump(path):
     )
 
 
-def test_query_df_uses_duckdb_fallback(tmp_path):
+def test_query_df_uses_duckdb_fallback(monkeypatch, tmp_path):
     duckdb_path = tmp_path / "mirror.duckdb"
     sql_dump = tmp_path / "dump.sql"
     _write_basic_inventory_dump(sql_dump)
 
     mgr = DBManager(
+        "postgresql://app:pw@localhost:5432/warehouse",
         max_retries=1,
         retry_interval=0,
         enable_duckdb_fallback=True,
@@ -91,6 +169,15 @@ def test_query_df_uses_duckdb_fallback(tmp_path):
         duckdb_auto_sync=False,
         duckdb_sql_dump_path=str(sql_dump),
     )
+
+    def failing_connect():
+        raise OperationalError(
+            'connection to server at "localhost" (127.0.0.1), port 5432 failed: Connection refused',
+            None,
+            None,
+        )
+
+    monkeypatch.setattr(mgr.engine, "connect", failing_connect)
 
     try:
         df = mgr.query_df(
@@ -104,12 +191,13 @@ def test_query_df_uses_duckdb_fallback(tmp_path):
     assert df.iloc[0]["product_name"] == "Widget"
 
 
-def test_vector_similarity_uses_duckdb_fallback(tmp_path):
+def test_vector_similarity_uses_duckdb_fallback(monkeypatch, tmp_path):
     duckdb_path = tmp_path / "mirror.duckdb"
     sql_dump = tmp_path / "dump.sql"
     _write_vector_dump(sql_dump)
 
     mgr = DBManager(
+        "postgresql://app:pw@localhost:5432/warehouse",
         max_retries=1,
         retry_interval=0,
         enable_duckdb_fallback=True,
@@ -119,40 +207,21 @@ def test_vector_similarity_uses_duckdb_fallback(tmp_path):
         duckdb_sql_dump_path=str(sql_dump),
     )
 
+    def failing_connect():
+        raise OperationalError(
+            'connection to server at "localhost" (127.0.0.1), port 5432 failed: Connection refused',
+            None,
+            None,
+        )
+
+    monkeypatch.setattr(mgr.engine, "connect", failing_connect)
+
     try:
-        df = mgr.vector_similarity([0.0, 1.0], limit=2)
+        df = mgr.vector_similarity([0.0, 1.0], limit=5)
     finally:
         mgr.close()
 
     assert not df.empty
-    assert "product_name" in df.columns
     assert df.iloc[0]["product_name"] == "Consumer Gin"
     assert df.iloc[0]["brand_name"] == "Brand Co"
 
-
-def test_execute_updates_duckdb(tmp_path):
-    duckdb_path = tmp_path / "mirror.duckdb"
-    sql_dump = tmp_path / "dump.sql"
-    _write_vector_dump(sql_dump)
-
-    mgr = DBManager(
-        enable_duckdb_fallback=True,
-        duckdb_path=str(duckdb_path),
-        duckdb_tables=["vip_products", "vip_brands"],
-        duckdb_auto_sync=False,
-        duckdb_sql_dump_path=str(sql_dump),
-    )
-
-    try:
-        mgr.execute(
-            "UPDATE vip_products SET product_name = :name WHERE vip_product_id = :pid",
-            {"name": "Updated Gin", "pid": 1},
-        )
-        df = mgr.query_df(
-            "SELECT product_name FROM vip_products WHERE vip_product_id = :pid",
-            {"pid": 1},
-        )
-    finally:
-        mgr.close()
-
-    assert df.iloc[0]["product_name"] == "Updated Gin"

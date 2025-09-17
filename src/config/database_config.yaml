@@ -1,11 +1,10 @@
 database:
-  driver: duckdb
-  path: ${DUCKDB_FALLBACK_PATH}
-  sql_dump: ${DUCKDB_SQL_DUMP}
-  # Legacy PostgreSQL settings retained for reference during DuckDB-only mode:
-  # host: ${DB_HOST}
-  # port: ${DB_PORT}
-  # database: ${DB_NAME}
-  # username: ${DB_USER}
-  # password: ${DB_PASS}
-  # sqlalchemy_url: ${DATABASE_URL}
+  driver: postgresql
+  host: ${DB_HOST}
+  port: ${DB_PORT}
+  database: ${DB_NAME}
+  username: ${DB_USER}
+  password: ${DB_PASS}
+  # If provided, SQLAlchemy will use this URL directly; otherwise it is
+  # constructed from the host/user/password values.
+  sqlalchemy_url: ${DATABASE_URL}

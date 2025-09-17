@@ -29,18 +29,15 @@ def main() -> None:
     logger.info("Starting database initialisation")
     try:
         db = get_db()
-        logger.info("PostgreSQL extension checks skipped; running in DuckDB-only mode.")
-        # try:
-        #     db.execute("CREATE EXTENSION IF NOT EXISTS vector")
-        # except Exception as exc:  # pragma: no cover - depends on DB
-        #     logger.warning("Vector extension unavailable: %s", exc)
-        # try:
-        #     db.execute(
-        #         "ALTER TABLE vip_products ADD COLUMN IF NOT EXISTS embedding VECTOR(1536)"
-        #     )
-        #     logger.info("Ensured vip_products.embedding VECTOR(1536).")
-        # except Exception as exc:
-        #     logger.warning("Could not ensure embedding column (continuing): %s", exc)
+        try:
+            db.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        except Exception as exc:  # pragma: no cover - depends on DB
+            logger.warning("Vector extension unavailable: %s", exc)
+        try:
+            db.execute("ALTER TABLE vip_products ADD COLUMN IF NOT EXISTS embedding VECTOR(1536)")
+            logger.info("Ensured vip_products.embedding VECTOR(1536).")
+        except Exception as exc:
+            logger.warning("Could not ensure embedding column (continuing): %s", exc)
         db.query_df("SELECT 1 FROM vip_products LIMIT 1")
     except Exception:
         logger.exception("Database initialisation failed")

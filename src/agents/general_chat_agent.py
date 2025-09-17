@@ -26,8 +26,6 @@ class GeneralChatAgent(AgentBase):
         logger.debug("GeneralChatAgent scoring request: %s", user_request)
 
         # Always return a baseline score.  This agent is a catch‑all.
-        if not self.llm_manager.is_enabled():
-            return 0.0
         return 0.5
 
     def handle(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
@@ -41,11 +39,6 @@ class GeneralChatAgent(AgentBase):
         message so the user understands why no answer was produced.
         """
         logger.info("GeneralChatAgent handling request")
-        if not self.llm_manager.is_enabled():
-            return (
-                "The language model is disabled while running in DuckDB-only mode. "
-                "Enable the LLM to restore free-form conversations."
-            )
         try:
             response = self.llm_manager.generate(user_request, chat_history)
             logger.debug("LLM response: %s", response)

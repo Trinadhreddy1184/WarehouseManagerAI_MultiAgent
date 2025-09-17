@@ -480,26 +480,6 @@ class DuckDBMirror:
             conn.close()
         return result
 
-    def execute(self, sql: str, params: Optional[Mapping[str, Any]] = None) -> None:
-        if not self.available:
-            raise RuntimeError("DuckDB fallback is not available")
-
-        import duckdb
-
-        rendered_sql, values = self._render_sql(sql, params)
-        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        conn = duckdb.connect(self.path)
-        try:
-            conn.execute("CREATE SCHEMA IF NOT EXISTS public;")
-            conn.execute("SET schema 'public'")
-            if values:
-                conn.execute(rendered_sql, values)
-            else:
-                conn.execute(rendered_sql)
-            conn.execute("CHECKPOINT;")
-        finally:
-            conn.close()
-
     def vector_similarity(
         self, query_vector: Sequence[float], *, limit: int = 5
     ) -> pd.DataFrame:
@@ -583,19 +563,16 @@ class DBManager:
         duckdb_sync_interval: Optional[float] = None,
         duckdb_sql_dump_path: Optional[str] = None,
     ) -> None:
-        # self.url = url or _build_sqlalchemy_url()
-        # self.engine: Engine = create_engine(self.url, pool_pre_ping=True, future=True)
-        self.url = "duckdb://"
-        self.engine: Optional[Engine] = None
+        self.url = url or _build_sqlalchemy_url()
+        self.engine: Engine = create_engine(self.url, pool_pre_ping=True, future=True)
         self.max_retries = max(1, max_retries)
         self.retry_interval = max(0.0, retry_interval)
 
-        # fallback_enabled = (
-        #     _env_flag("ENABLE_DUCKDB_FALLBACK", True)
-        #     if enable_duckdb_fallback is None
-        #     else enable_duckdb_fallback
-        # )
-        fallback_enabled = True
+        fallback_enabled = (
+            _env_flag("ENABLE_DUCKDB_FALLBACK", True)
+            if enable_duckdb_fallback is None
+            else enable_duckdb_fallback
+        )
         fallback_path = duckdb_path or os.getenv(
             "DUCKDB_FALLBACK_PATH", os.path.join("data", "postgres_mirror.duckdb")
         )
@@ -633,16 +610,6 @@ class DBManager:
                     mirror.maybe_sync_from_sql_dump()
             else:
                 logger.warning("DuckDB fallback requested but dependencies are unavailable.")
-
-        if self._duckdb_mirror is None:
-            raise RuntimeError(
-                "DuckDB fallback is required while PostgreSQL support is disabled."
-            )
-
-        if not self._duckdb_mirror.is_ready():
-            self._duckdb_mirror.ensure_from_sql_dump()
-
-        self.url = f"duckdb:///{self._duckdb_mirror.path}"
 
         logger.debug(
             "DBManager initialised with url=%s (retries=%d, interval=%.2fs, duckdb_fallback=%s)",
@@ -709,15 +676,28 @@ class DBManager:
 
         logger.debug("Running query: %s | params=%s", sql, params)
 
-        if self._duckdb_mirror is None:
-            raise RuntimeError("DuckDB backend is not configured")
+        def _query() -> pd.DataFrame:
+            with self.engine.connect() as conn:
+                return pd.read_sql(text(sql), conn, params=params)
 
-        if not self._duckdb_mirror.is_ready():
-            self._duckdb_mirror.ensure_from_sql_dump()
-
-        result = self._duckdb_mirror.query_df(sql, params)
-        # self._maybe_sync_duckdb()
-        return result
+        try:
+            result = self._run_with_retries(_query, "query")
+        except OperationalError as exc:
+            if self._duckdb_mirror and self._is_transient_operational_error(exc):
+                if self._duckdb_mirror.ensure_from_sql_dump():
+                    logger.warning(
+                        "Primary database query failed (%s); using DuckDB fallback.",
+                        exc,
+                    )
+                    try:
+                        return self._duckdb_mirror.query_df(sql, params)
+                    except Exception as fallback_exc:
+                        logger.error("DuckDB fallback query failed: %s", fallback_exc)
+                        raise exc
+            raise
+        else:
+            self._maybe_sync_duckdb()
+            return result
 
     def vector_similarity(
         self, query_vector: Sequence[float], *, limit: int = 5
@@ -726,29 +706,45 @@ class DBManager:
 
         payload = list(query_vector)
 
-        if self._duckdb_mirror is None:
-            raise RuntimeError("DuckDB backend is not configured")
+        sql = """
+            SELECT
+                COALESCE(NULLIF(TRIM(p.consumer_product_name), ''), TRIM(p.product_name)) AS product_name,
+                COALESCE(NULLIF(TRIM(b.consumer_brand_name), ''), TRIM(b.brand_name)) AS brand_name
+            FROM vip_products AS p
+            LEFT JOIN vip_brands AS b ON p.vip_brand_id = b.vip_brand_id
+            ORDER BY p.embedding <-> :vector
+            LIMIT :limit
+        """
 
-        if not self._duckdb_mirror.is_ready():
-            self._duckdb_mirror.ensure_from_sql_dump()
+        def _query() -> pd.DataFrame:
+            with self.engine.connect() as conn:
+                return pd.read_sql(text(sql), conn, params={"vector": payload, "limit": limit})
 
-        result = self._duckdb_mirror.vector_similarity(payload, limit=limit)
-        # self._maybe_sync_duckdb()
-        return result
+        try:
+            result = self._run_with_retries(_query, "vector search")
+        except OperationalError as exc:
+            if self._duckdb_mirror and self._is_transient_operational_error(exc):
+                if self._duckdb_mirror.ensure_from_sql_dump():
+                    logger.warning(
+                        "Primary vector search failed (%s); using DuckDB fallback.",
+                        exc,
+                    )
+                    return self._duckdb_mirror.vector_similarity(payload, limit=limit)
+            raise
+        else:
+            self._maybe_sync_duckdb()
+            return result
 
     def execute(self, sql: str, params: Optional[Mapping[str, Any]] = None) -> None:
         """Execute a non-returning statement (INSERT/UPDATE/DDL)."""
 
         logger.debug("Executing statement: %s | params=%s", sql, params)
 
-        if self._duckdb_mirror is None:
-            raise RuntimeError("DuckDB backend is not configured")
+        def _execute() -> None:
+            with self.engine.begin() as conn:
+                conn.execute(text(sql), params or {})
 
-        if not self._duckdb_mirror.is_ready():
-            self._duckdb_mirror.ensure_from_sql_dump()
-
-        self._duckdb_mirror.execute(sql, params)
-        # self._maybe_sync_duckdb()
+        self._run_with_retries(_execute, "statement")
 
     def sync_duckdb_backup(self) -> bool:
         """Manually trigger a DuckDB mirror sync."""
@@ -759,15 +755,14 @@ class DBManager:
         return self._duckdb_mirror.sync_from_sql_dump(force=True)
 
     def close(self) -> None:
-        # if self.engine is not None:
-        #     try:
-        #         self.engine.dispose()
-        #         logger.debug("Database engine disposed")
-        #     except Exception as exc:  # pragma: no cover - best effort cleanup
-        #         logger.exception("Error disposing engine: %s", exc)
-        if self._duckdb_mirror is not None:
-            self._duckdb_mirror.close()
-            logger.debug("DuckDB mirror closed")
+        try:
+            self.engine.dispose()
+            logger.debug("Database engine disposed")
+        except Exception as exc:  # pragma: no cover - best effort cleanup
+            logger.exception("Error disposing engine: %s", exc)
+        finally:
+            if self._duckdb_mirror is not None:
+                self._duckdb_mirror.close()
 
 
 # Global helper similar to the original project
