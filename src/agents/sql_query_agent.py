@@ -1,7 +1,11 @@
 import logging
-from typing import Optional, List, Dict, Tuple
-import boto3
+from typing import List, Dict, Tuple
 import json
+
+try:
+    import boto3
+except Exception:  # pragma: no cover - optional dependency
+    boto3 = None  # type: ignore[assignment]
 from src.agents.base import AgentBase
 from src.database.db_manager import get_db
 from src.llm.manager import LLMManager
@@ -22,17 +26,27 @@ class SqlQueryAgent(AgentBase):
     def __init__(self, llm_manager: LLMManager) -> None:
         self.llm_manager = llm_manager
         self.db = get_db()
-        # Set up Bedrock client, reuse if available
-        try:
-            self.bedrock_client = self.llm_manager.llm._br  # type: ignore[attr-defined]
-        except Exception as e:
-            logger.warning("Bedrock client not found on LLMManager; creating a new one: %s", e)
-            region = (
-                self.llm_manager.config.get("bedrock", {}).get("region_name")
-                if hasattr(self.llm_manager, "config")
-                else None
-            ) or "us-east-1"
-            self.bedrock_client = boto3.client("bedrock-runtime", region_name=region)
+        self._enabled = self.llm_manager.is_enabled()
+        self.bedrock_client = None
+        if self._enabled:
+            try:
+                self.bedrock_client = self.llm_manager.llm._br  # type: ignore[attr-defined]
+            except Exception as e:
+                logger.warning("Bedrock client not found on LLMManager; creating a new one: %s", e)
+                region = (
+                    self.llm_manager.config.get("bedrock", {}).get("region_name")
+                    if hasattr(self.llm_manager, "config")
+                    else None
+                ) or "us-east-1"
+                if boto3 is None:
+                    logger.error("boto3 is unavailable; SQL generation cannot run")
+                    self._enabled = False
+                else:
+                    self.bedrock_client = boto3.client(
+                        "bedrock-runtime", region_name=region
+                    )
+        if not self._enabled:
+            logger.info("SqlQueryAgent initialised with LLM disabled")
 
     def name(self) -> str:
         return self.NAME
@@ -50,6 +64,12 @@ class SqlQueryAgent(AgentBase):
 
     def handle(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
         logger.info("SqlQueryAgent handling: %s", user_request)
+
+        if not self._enabled or self.bedrock_client is None:
+            return (
+                "Automated SQL generation is disabled while the language model is offline. "
+                "Enable the LLM to restore this feature."
+            )
 
         # Load database schema from JSON if available, otherwise introspect
         schema_str = ""

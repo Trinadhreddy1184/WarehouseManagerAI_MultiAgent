@@ -12,8 +12,10 @@ def reset_db_manager():
 
 
 def test_main_exits_when_table_missing(tmp_path, monkeypatch):
-    db_file = tmp_path / "test.db"
-    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_file}")
+    duckdb_file = tmp_path / "test.duckdb"
+    monkeypatch.setenv("DUCKDB_FALLBACK_PATH", str(duckdb_file))
+    monkeypatch.delenv("DUCKDB_SQL_DUMP", raising=False)
+    monkeypatch.delenv("SQL_FILE", raising=False)
     with pytest.raises(SystemExit):
         init_db.main()
 
