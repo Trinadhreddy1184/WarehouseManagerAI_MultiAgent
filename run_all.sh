@@ -42,8 +42,6 @@ mkdir -p "$(dirname "$DUCKDB_SQL_DUMP")"
 
 export DUCKDB_FALLBACK_PATH="$DUCKDB_DB_PATH"
 export DUCKDB_SQL_DUMP
-: "${DUCKDB_AUTO_SYNC:=0}"
-export DUCKDB_AUTO_SYNC
 
 # Pick compose command
 if command -v docker-compose >/dev/null 2>&1; then
@@ -107,7 +105,6 @@ python3 <<'PY'
 import os
 import sys
 from pathlib import Path
-from textwrap import dedent
 
 ROOT = Path.cwd()
 if str(ROOT / "src") not in sys.path:
@@ -125,151 +122,6 @@ manager = DBManager(
     duckdb_sql_dump_path=dump,
 )
 try:
-    synced = manager.sync_duckdb_backup()
-    if not synced:
-        print(
-            "[run_all] DuckDB sync skipped (no usable SQL dump). Building sample dataset…",
-            flush=True,
-        )
-        import duckdb
-
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        conn = duckdb.connect(db_path)
-        try:
-            conn.execute("CREATE SCHEMA IF NOT EXISTS public;")
-            conn.execute("SET schema 'public'")
-            conn.execute("DROP VIEW IF EXISTS app_inventory")
-            conn.execute("DROP TABLE IF EXISTS vip_items")
-            conn.execute("DROP TABLE IF EXISTS vip_products")
-            conn.execute("DROP TABLE IF EXISTS vip_brands")
-            conn.execute(
-                """
-                CREATE TABLE vip_brands (
-                    vip_brand_id INTEGER,
-                    consumer_brand_name TEXT,
-                    brand_name TEXT,
-                    brand_short_name TEXT
-                )
-                """
-            )
-            conn.execute(
-                """
-                INSERT INTO vip_brands VALUES
-                    (1, 'Sunrise Distillers', 'Sunrise Distillers', 'Sunrise'),
-                    (2, 'Moonlight Brewing', 'Moonlight Brewing', 'Moonlight')
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE vip_products (
-                    vip_product_id INTEGER,
-                    vip_brand_id INTEGER,
-                    consumer_product_name TEXT,
-                    product_name TEXT,
-                    product_short_name TEXT,
-                    fanciful_name TEXT,
-                    embedding TEXT
-                )
-                """
-            )
-            conn.execute(
-                """
-                INSERT INTO vip_products VALUES
-                    (1, 1, 'Sunrise Gin', 'Sunrise Gin', 'Sunrise', 'Sunrise Reserve', '[0.1, 0.8, 0.1]'),
-                    (2, 2, 'Moonlight Stout', 'Moonlight Stout', 'Moon Stout', 'Moonlight Special', '[0.8, 0.1, 0.1]')
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE vip_items (
-                    vip_item_id INTEGER,
-                    vip_product_id INTEGER,
-                    store TEXT,
-                    vip_source_id INTEGER,
-                    quantity INTEGER,
-                    price DOUBLE,
-                    last_updated TIMESTAMP
-                )
-                """
-            )
-            conn.execute(
-                """
-                INSERT INTO vip_items VALUES
-                    (1, 1, 'Downtown Store', 101, 42, 24.99, '2024-01-01 10:00:00'),
-                    (2, 2, 'Uptown Store', 102, 18, 12.49, '2024-01-02 09:30:00')
-                """
-            )
-            conn.execute(
-                """
-                CREATE OR REPLACE VIEW app_inventory AS
-                SELECT
-                    i.*,
-                    COALESCE(
-                        NULLIF(TRIM(p.consumer_product_name), ''),
-                        NULLIF(TRIM(p.product_name), ''),
-                        NULLIF(TRIM(p.product_short_name), ''),
-                        NULLIF(TRIM(p.fanciful_name), ''),
-                        'Unknown'
-                    ) AS product_name,
-                    COALESCE(
-                        NULLIF(TRIM(b.consumer_brand_name), ''),
-                        NULLIF(TRIM(b.brand_name), ''),
-                        NULLIF(TRIM(b.brand_short_name), ''),
-                        'Unknown'
-                    ) AS brand_name
-                FROM vip_items i
-                JOIN vip_products p ON p.vip_product_id = i.vip_product_id
-                JOIN vip_brands b ON b.vip_brand_id = p.vip_brand_id
-                """
-            )
-            conn.execute("CHECKPOINT;")
-        finally:
-            conn.close()
-
-        dump_path = Path(dump)
-        if not dump_path.exists() or dump_path.stat().st_size == 0:
-            dump_path.write_text(
-                dedent(
-                    """
-                    CREATE SCHEMA IF NOT EXISTS public;
-                    CREATE TABLE IF NOT EXISTS public.vip_brands (
-                        vip_brand_id INTEGER,
-                        consumer_brand_name TEXT,
-                        brand_name TEXT,
-                        brand_short_name TEXT
-                    );
-                    INSERT INTO public.vip_brands VALUES
-                        (1, 'Sunrise Distillers', 'Sunrise Distillers', 'Sunrise'),
-                        (2, 'Moonlight Brewing', 'Moonlight Brewing', 'Moonlight');
-                    CREATE TABLE IF NOT EXISTS public.vip_products (
-                        vip_product_id INTEGER,
-                        vip_brand_id INTEGER,
-                        consumer_product_name TEXT,
-                        product_name TEXT,
-                        product_short_name TEXT,
-                        fanciful_name TEXT,
-                        embedding TEXT
-                    );
-                    INSERT INTO public.vip_products VALUES
-                        (1, 1, 'Sunrise Gin', 'Sunrise Gin', 'Sunrise', 'Sunrise Reserve', '[0.1, 0.8, 0.1]'),
-                        (2, 2, 'Moonlight Stout', 'Moonlight Stout', 'Moon Stout', 'Moonlight Special', '[0.8, 0.1, 0.1]');
-                    CREATE TABLE IF NOT EXISTS public.vip_items (
-                        vip_item_id INTEGER,
-                        vip_product_id INTEGER,
-                        store TEXT,
-                        vip_source_id INTEGER,
-                        quantity INTEGER,
-                        price DOUBLE,
-                        last_updated TIMESTAMP
-                    );
-                    INSERT INTO public.vip_items VALUES
-                        (1, 1, 'Downtown Store', 101, 42, 24.99, '2024-01-01 10:00:00'),
-                        (2, 2, 'Uptown Store', 102, 18, 12.49, '2024-01-02 09:30:00');
-                    """
-                ).strip()
-                + "\n",
-                encoding="utf-8",
-            )
     manager.sync_duckdb_backup()
 finally:
     manager.close()
