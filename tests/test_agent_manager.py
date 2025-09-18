@@ -36,10 +36,11 @@ def _manager_with_agents(*agents):
 
 def test_falls_back_when_response_scores_low():
     manager = _manager_with_agents(
-        DummyAgent(1.0, "I'm sorry, can't do that"),
+        DummyAgent(1.0, "No results found."),
         DummyAgent(0.5, "success"),
     )
-    assert manager.handle_request("request", []) == "success"
+    history = [("user", "request")]
+    assert manager.handle_request("request", history) == "success"
 
 
 def test_returns_first_satisfactory_response():
@@ -47,7 +48,8 @@ def test_returns_first_satisfactory_response():
         DummyAgent(1.0, "all good"),
         DummyAgent(0.5, "fallback"),
     )
-    assert manager.handle_request("request", []) == "all good"
+    history = [("user", "request")]
+    assert manager.handle_request("request", history) == "all good"
 
 
 def test_general_chat_returns_error_when_llm_unavailable():
@@ -58,5 +60,12 @@ def test_general_chat_returns_error_when_llm_unavailable():
     llm_mgr = LLMManager({}, FailingLLM())
     agent = GeneralChatAgent(llm_mgr)
     manager = AgentManager(llm_mgr, agents=[agent])
-    response = manager.handle_request("hello", [])
+    history = [("user", "hello")]
+    response = manager.handle_request("hello", history)
     assert "language model is unavailable" in response.lower()
+
+
+def test_handle_request_requires_chat_history():
+    manager = _manager_with_agents(DummyAgent(1.0, "ok"))
+    with pytest.raises(ValueError):
+        manager.handle_request("request", [])

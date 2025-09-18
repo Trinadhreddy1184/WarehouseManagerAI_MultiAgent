@@ -14,12 +14,20 @@ class AgentBase(abc.ABC):
     """Abstract base class for all agents."""
 
     @abc.abstractmethod
-    def score_request(self, user_request: str, chat_history: List[Tuple[str, str]]) -> float:
+    def score_request(
+        self,
+        user_request: str,
+        chat_history: List[Tuple[str, str]],
+    ) -> float:
         """Return a score between 0 and 1 indicating how well this agent can handle the request."""
         raise NotImplementedError
 
     @abc.abstractmethod
-    def handle(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
+    def handle(
+        self,
+        user_request: str,
+        chat_history: List[Tuple[str, str]],
+    ) -> str:
         """Generate a response to the user's request."""
         raise NotImplementedError
 

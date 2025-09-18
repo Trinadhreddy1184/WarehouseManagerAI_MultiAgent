@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, List, Dict, Tuple
+from typing import List, Tuple
 from .base import AgentBase
 from src.llm.manager import LLMManager
 from src.database.db_manager import get_db
@@ -33,7 +33,11 @@ class VectorSearchAgent(AgentBase):
         else:
             logger.warning("pgvector adapter not registered, vector search disabled.")
 
-    def score_request(self, user_request: str, chat_history: List[Tuple[str, str]]) -> float:
+    def score_request(
+        self,
+        user_request: str,
+        chat_history: List[Tuple[str, str]],
+    ) -> float:
         """
         Return a relevance score for this agent.  Lower priority if the query
         contains product/brand keywords (to let the ProductLookupAgent handle them).
@@ -47,10 +51,17 @@ class VectorSearchAgent(AgentBase):
         # Baseline score for general semantic queries (catch-all, like GeneralChatAgent)
         return 0.5  # same baseline used by GeneralChatAgent
 
-    def handle(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
+    def handle(
+        self,
+        user_request: str,
+        chat_history: List[Tuple[str, str]],
+    ) -> str:
         """
         Compute the query embedding and perform a pgvector similarity search in vip_products.
         """
+        if not chat_history:
+            raise ValueError("chat_history must include the current user request")
+
         text = (user_request or "").strip()
         if not text:
             return "What product or feature are you interested in?"

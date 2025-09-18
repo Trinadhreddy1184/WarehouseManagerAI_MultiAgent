@@ -53,7 +53,8 @@ def main() -> None:
     llm_config_path = os.getenv("LLM_CONFIG_PATH", "src/config/llm_config.yaml")
     llm = LLMManager.from_config(load_llm_config(llm_config_path))
     prompt = f"Provide a short marketing blurb for {product_name} by {brand_name}."
-    response = llm.generate(prompt, [])
+    chat_history = [("user", prompt)]
+    response = llm.generate(prompt, chat_history)
     print("LLM response:", response)
 
     print("Sanity check passed.")

@@ -37,9 +37,9 @@ class AgentManager:
         """
         self.llm_manager = llm_manager
         self.agents: List[AgentBase] = agents or [
-            VectorSearchAgent(llm_manager),
-            ProductLookupAgent(),
             SqlQueryAgent(llm_manager),
+            ProductLookupAgent(),
+            VectorSearchAgent(llm_manager),
             GeneralChatAgent(llm_manager)
         ]
         self.evaluator = evaluator or ResponseEvaluator()
@@ -49,17 +49,33 @@ class AgentManager:
             self.evaluator.threshold,
         )
 
-    def handle_request(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
+    def handle_request(
+        self,
+        user_request: str,
+        chat_history: List[Tuple[str, str]],
+    ) -> str:
         """Dispatch a user request to the most appropriate agent.
 
         Agents are tried in order of their relevance score. After each
         response an evaluator determines whether the answer is acceptable. If
         not, the next best agent is attempted. The last response is returned
         even if it fails evaluation to ensure the user receives some output.
+
+        Parameters
+        ----------
+        user_request : str
+            Latest utterance from the user.
+        chat_history : List[Tuple[str, str]]
+            Full conversation including the latest user message. The manager
+            requires at least one entry so agents can ground their responses
+            in context instead of starting from a blank state.
         """
         logger.info("Handling user request: %s", user_request)
+        if not chat_history:
+            raise ValueError("chat_history must contain at least the current user message")
+        history = list(chat_history)
         scores = [
-            (agent, agent.score_request(user_request, chat_history))
+            (agent, agent.score_request(user_request, history))
             for agent in self.agents
         ]
         logger.debug("Agent scores: %s", [(type(a).__name__, s) for a, s in scores])
@@ -68,7 +84,7 @@ class AgentManager:
         for agent, _score in scores:
             logger.debug("Trying agent %s", type(agent).__name__)
             try:
-                response = agent.handle(user_request, chat_history)
+                response = agent.handle(user_request, history)
             except Exception as exc:
                 logger.exception("Agent %s failed: %s", type(agent).__name__, exc)
                 continue
