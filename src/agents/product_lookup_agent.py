@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Tuple
 
 from sqlalchemy.exc import ProgrammingError
 
@@ -48,7 +48,11 @@ class ProductLookupAgent(AgentBase):
 
     # --- Agent routing signal -------------------------------------------------
 
-    def score_request(self, user_request: str, chat_history: List[Tuple[str, str]]) -> float:
+    def score_request(
+        self,
+        user_request: str,
+        chat_history: List[Tuple[str, str]],
+    ) -> float:
         """
         Heuristic score: proportional to number of inventory-related keywords present.
         """
@@ -59,7 +63,11 @@ class ProductLookupAgent(AgentBase):
 
     # --- Core handler ---------------------------------------------------------
 
-    def handle(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
+    def handle(
+        self,
+        user_request: str,
+        chat_history: List[Tuple[str, str]],
+    ) -> str:
         """
         Execute a lookup against the `app_inventory` view.
 
@@ -68,6 +76,9 @@ class ProductLookupAgent(AgentBase):
           - product_name (TEXT)
           - brand_name (TEXT)
         """
+        if not chat_history:
+            raise ValueError("chat_history must include the current user request")
+
         user_request = (user_request or "").strip()
         if not user_request:
             return "Please tell me what product or brand to look up."

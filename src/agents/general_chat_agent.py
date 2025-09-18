@@ -21,14 +21,22 @@ class GeneralChatAgent(AgentBase):
     def __init__(self, llm_manager: LLMManager) -> None:
         self.llm_manager = llm_manager
 
-    def score_request(self, user_request: str, chat_history: List[Tuple[str, str]]) -> float:
+    def score_request(
+        self,
+        user_request: str,
+        chat_history: List[Tuple[str, str]],
+    ) -> float:
 
         logger.debug("GeneralChatAgent scoring request: %s", user_request)
 
         # Always return a baseline score.  This agent is a catch‑all.
         return 0.5
 
-    def handle(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
+    def handle(
+        self,
+        user_request: str,
+        chat_history: List[Tuple[str, str]],
+    ) -> str:
 
         """Generate a response via the underlying LLM.
 
@@ -39,6 +47,8 @@ class GeneralChatAgent(AgentBase):
         message so the user understands why no answer was produced.
         """
         logger.info("GeneralChatAgent handling request")
+        if not chat_history:
+            raise ValueError("chat_history must include the current user request")
         try:
             response = self.llm_manager.generate(user_request, chat_history)
             logger.debug("LLM response: %s", response)

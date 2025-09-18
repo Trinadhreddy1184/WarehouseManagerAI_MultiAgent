@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, List, Dict, Tuple
+from typing import List, Tuple
 import boto3
 import json
 from src.agents.base import AgentBase
@@ -37,19 +37,93 @@ class SqlQueryAgent(AgentBase):
     def name(self) -> str:
         return self.NAME
 
-    def score_request(self, user_request: str, chat_history: List[Tuple[str, str]]) -> float:
-        text = (user_request or "").lower()
-        triggers = [
-            " most ", " least ", " highest ", " lowest ",
-            " average ", " averages ", " sum ", " total ",
-            " number of ", " count ", "distinct", " per store", " by store",
+    def score_request(
+        self,
+        user_request: str,
+        chat_history: List[Tuple[str, str]],
+    ) -> float:
+        text = (user_request or "").lower().strip()
+        if not text:
+            return 0.0
+
+        aggregate_triggers = [
+            " most ",
+            " least ",
+            " highest ",
+            " lowest ",
+            " average ",
+            " averages ",
+            " sum ",
+            " total ",
+            " number of ",
+            " count ",
+            "distinct",
+            " per store",
+            " by store",
+            " top ",
+            " bottom ",
         ]
-        if any(t in text for t in triggers):
+
+        if any(phrase in text for phrase in aggregate_triggers):
+            return 0.95
+
+        analytic_keywords = [
+            "inventory",
+            "warehouse",
+            "stock",
+            "store",
+            "availability",
+            "available",
+            "list",
+            "show",
+            "lookup",
+            "report",
+            "catalog",
+            "sku",
+            "product",
+            "brand",
+            "units",
+            "quantity",
+            "do we have",
+            "in stock",
+            "app_inventory",
+        ]
+
+        follow_up = False
+        if len(chat_history) >= 2:
+            prev_role, prev_message = chat_history[-2]
+            if prev_role == "assistant":
+                prev_text = prev_message.lower()
+                if any(keyword in prev_text for keyword in ("result", "inventory", "product", "store")):
+                    follow_up = True
+
+        if any(keyword in text for keyword in analytic_keywords) or follow_up:
             return 0.8
+
         return 0.0
 
-    def handle(self, user_request: str, chat_history: List[Tuple[str, str]]) -> str:
+    def handle(
+        self,
+        user_request: str,
+        chat_history: List[Tuple[str, str]],
+    ) -> str:
+        if not chat_history:
+            raise ValueError("chat_history must include the current user request")
+
         logger.info("SqlQueryAgent handling: %s", user_request)
+
+        context_messages: List[Tuple[str, str]] = chat_history[:-1]
+        conversation_context = ""
+        if context_messages:
+            recent = context_messages[-6:]
+            formatted = []
+            for role, message in recent:
+                snippet = message.strip()
+                if not snippet:
+                    continue
+                formatted.append(f"{role.upper()}: {snippet}")
+            if formatted:
+                conversation_context = "\n".join(formatted)
 
         # Load database schema from JSON if available, otherwise introspect
         schema_str = ""
@@ -112,6 +186,9 @@ class SqlQueryAgent(AgentBase):
             "Output ONLY a single SQL SELECT statement (no backticks, no explanations). "
             "Do not modify or write any data."
         )
+
+        if conversation_context:
+            system_prompt += "Recent conversation:\n" + conversation_context + "\n"
 
         messages = [
             {"role": "system", "content": [{"text": system_prompt}]},

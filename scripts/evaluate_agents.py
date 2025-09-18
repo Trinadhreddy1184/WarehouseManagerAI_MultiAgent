@@ -58,11 +58,15 @@ tests = [
     "Do we have product XYZ in store 1 inventory?"
 ]
 
+chat_history: list[tuple[str, str]] = []
+
 # Run each test query through the AgentManager
 for q in tests:
     print(f"\n[py] Q: {q}")
     try:
-        ans = agent_manager.handle_request(q, [])
+        chat_history.append(("user", q))
+        ans = agent_manager.handle_request(q, chat_history)
+        chat_history.append(("assistant", ans))
         print(textwrap.shorten("[py] A: " + (ans or ""), width=500))
     except Exception as e:
         print("[py][x] Error:", repr(e))

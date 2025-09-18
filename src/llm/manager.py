@@ -12,6 +12,7 @@ from typing import List, Tuple, Dict, Any, Optional
 import logging
 
 from .bedrock import BedrockLLM
+from .embeddings import EmbeddingManager
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class LLMManager:
     def __init__(self, config: Dict[str, Any], llm: Any):
         self.config = config
         self.llm = llm
+        self._embedding_manager: Optional[EmbeddingManager] = None
 
         logger.debug("LLMManager initialised with config: %s", config)
 
@@ -62,13 +64,38 @@ class LLMManager:
         user_request : str
             The raw query from the user.
         chat_history : List of (role, text) tuples
-            Past conversation history in alternating roles.  If omitted an
-            empty history is assumed.
+            Past conversation history in alternating roles. The list must
+            include at least the latest user message so the LLM can ground the
+            response in context.
         """
 
         logger.info("Generating response for request: %s", user_request)
-        response = self.llm.generate(user_request, chat_history or [], context=context)
+        if not chat_history:
+            raise ValueError("chat_history must include at least the current user request")
+        response = self.llm.generate(user_request, chat_history, context=context)
         logger.debug("LLMManager received response: %s", response)
         return response
+
+    def get_embedding(self) -> EmbeddingManager:
+        """Return a cached embedding manager instance."""
+
+        if self._embedding_manager is None:
+            embed_conf = self.config.get("embedding", {}) if isinstance(self.config, dict) else {}
+            model_id = None
+            region = None
+            if isinstance(embed_conf, dict):
+                model_id = embed_conf.get("model_id")
+                region = embed_conf.get("region_name")
+            if not region:
+                bedrock_conf = self.config.get("bedrock", {}) if isinstance(self.config, dict) else {}
+                if isinstance(bedrock_conf, dict):
+                    region = bedrock_conf.get("region_name")
+            self._embedding_manager = EmbeddingManager(model_id=model_id, region=region)
+            logger.debug(
+                "Created EmbeddingManager model_id=%s region=%s",
+                model_id or "(default)",
+                region or "(default)",
+            )
+        return self._embedding_manager
 
 

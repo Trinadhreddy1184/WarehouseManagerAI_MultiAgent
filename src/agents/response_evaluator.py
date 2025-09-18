@@ -30,7 +30,13 @@ class ResponseEvaluator:
     threshold: float = 0.5
 
     # Patterns that suggest the agent could not handle the request
-    FAILURE_PATTERNS = (r"i'm sorry", r"couldn't", r"cannot")
+    FAILURE_PATTERNS = (
+        r"i'm sorry",
+        r"couldn't",
+        r"cannot",
+        r"no results found",
+        r"no products found",
+    )
 
     def evaluate(self, user_request: str, response: str) -> float:
         """Return a score in [0, 1] for the supplied response."""
