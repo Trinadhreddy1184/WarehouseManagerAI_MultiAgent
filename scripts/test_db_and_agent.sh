@@ -107,8 +107,11 @@ tests = [
 
 for q in tests:
     print("\n[py] Q:", q)
+    chat_history = [("user", q)]
     try:
-        ans = agent.handle(q)
+        score = agent.score_request(q, chat_history)
+        print(f"[py] score_request -> {score:.2f}")
+        ans = agent.handle(q, chat_history)
         print(textwrap.shorten("[py] A: " + (ans or ""), width=500))
     except Exception as e:
         print("[py][x] Error:", repr(e))
