@@ -55,6 +55,7 @@ class VectorSearchAgent(AgentBase):
         self,
         user_request: str,
         chat_history: List[Tuple[str, str]],
+        **_: object,
     ) -> str:
         """
         Compute the query embedding and perform a pgvector similarity search in vip_products.

@@ -36,6 +36,7 @@ class ResponseEvaluator:
         r"cannot",
         r"no results found",
         r"no products found",
+        r"language model is unavailable",
     )
 
     def evaluate(self, user_request: str, response: str) -> float:

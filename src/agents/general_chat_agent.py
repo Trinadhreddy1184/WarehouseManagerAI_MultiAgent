@@ -36,6 +36,9 @@ class GeneralChatAgent(AgentBase):
         self,
         user_request: str,
         chat_history: List[Tuple[str, str]],
+        *,
+        context: str | None = None,
+        **_: object,
     ) -> str:
 
         """Generate a response via the underlying LLM.
@@ -50,7 +53,11 @@ class GeneralChatAgent(AgentBase):
         if not chat_history:
             raise ValueError("chat_history must include the current user request")
         try:
-            response = self.llm_manager.generate(user_request, chat_history)
+            response = self.llm_manager.generate(
+                user_request,
+                chat_history,
+                context=context,
+            )
             logger.debug("LLM response: %s", response)
             return response
         except Exception as exc:  # pragma: no cover - defensive logging

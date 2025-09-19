@@ -67,6 +67,7 @@ class ProductLookupAgent(AgentBase):
         self,
         user_request: str,
         chat_history: List[Tuple[str, str]],
+        **_: object,
     ) -> str:
         """
         Execute a lookup against the `app_inventory` view.
