@@ -8,6 +8,35 @@ from src.llm.manager import LLMManager
 
 logger = logging.getLogger(__name__)
 
+
+def _format_schema_for_prompt(tables: dict[str, list[str]]) -> str:
+    """Return a trimmed, human-readable schema summary for prompting."""
+
+    if not tables:
+        return ""
+
+    schema_lines = []
+    for table, cols in tables.items():
+        display_cols = cols[:30]
+        cols_list = ", ".join(display_cols)
+        line = f"{table} ({cols_list})"
+        if len(cols) > len(display_cols):
+            line += f", ... ({len(cols) - len(display_cols)} more columns)"
+        schema_lines.append(line)
+
+    max_chars = 4000
+    trimmed_lines = []
+    running_total = 0
+    for line in schema_lines:
+        line_len = len(line) + 1  # account for newline
+        if running_total + line_len > max_chars:
+            trimmed_lines.append("... (schema truncated for brevity)")
+            break
+        trimmed_lines.append(line)
+        running_total += line_len
+
+    return "\n".join(trimmed_lines)
+
 class SqlQueryAgent(AgentBase):
     """
     Use the Bedrock LLM to generate a SQL SELECT and execute it safely
@@ -149,11 +178,7 @@ class SqlQueryAgent(AgentBase):
                         if table and isinstance(columns, list):
                             tables.setdefault(table, []).extend(columns)
             # Build schema lines
-            schema_lines = []
-            for table, cols in tables.items():
-                cols_list = ", ".join(cols)
-                schema_lines.append(f"{table} ({cols_list})")
-            schema_str = "\n".join(schema_lines)
+            schema_str = _format_schema_for_prompt(tables)
         except Exception as e:
             logger.exception("Failed to load schema.json: %s", e)
             # Fallback: introspect the database schema
@@ -168,11 +193,7 @@ class SqlQueryAgent(AgentBase):
                 tables = {}
                 for table, col in zip(schema_df["table_name"], schema_df["column_name"]):
                     tables.setdefault(table, []).append(col)
-                schema_lines = []
-                for table, cols in tables.items():
-                    cols_list = ", ".join(cols)
-                    schema_lines.append(f"{table} ({cols_list})")
-                schema_str = "\n".join(schema_lines)
+                schema_str = _format_schema_for_prompt(tables)
             except Exception as e2:
                 logger.exception("Failed to retrieve database schema: %s", e2)
                 schema_str = ""
