@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 def test_schema_json_is_valid_and_includes_app_inventory():
-    path = Path("src/database/schema.json")
+    path = Path(__file__).resolve().parents[1] / "src" / "database" / "schema.json"
     data = json.loads(path.read_text())
     assert "app_inventory" in data
     assert isinstance(data["app_inventory"], list)

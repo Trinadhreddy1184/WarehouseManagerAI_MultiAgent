@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from typing import List, Tuple
 import boto3
 import json
@@ -7,6 +8,9 @@ from src.database.db_manager import get_db
 from src.llm.manager import LLMManager
 
 logger = logging.getLogger(__name__)
+
+
+SCHEMA_PATH = Path(__file__).resolve().parents[1] / "database" / "schema.json"
 
 
 def _format_schema_for_prompt(tables: dict[str, list[str]]) -> str:
@@ -206,7 +210,7 @@ class SqlQueryAgent(AgentBase):
         # Load database schema from JSON if available, otherwise introspect
         schema_str = ""
         try:
-            with open("src/database/schema.json", "r") as f:
+            with SCHEMA_PATH.open("r", encoding="utf-8") as f:
                 schema_json = json.load(f)
             tables = {}
             # Determine format of schema JSON
