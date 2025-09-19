@@ -16,6 +16,13 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
+# Also ensure the repository root is importable so ``scripts`` becomes a
+# namespace package when this module is executed directly (``python
+# scripts/init_db.py``).  Without this adjustment, the absolute import of
+# ``scripts.index_embeddings`` below fails because Python's import machinery
+# only adds the *script* directory to ``sys.path`` by default, not its parent.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from config.logging_config import setup_logging  # noqa: E402
 from database.db_manager import get_db  # noqa: E402  (import after path tweak)
