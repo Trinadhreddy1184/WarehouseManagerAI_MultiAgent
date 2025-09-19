@@ -135,6 +135,7 @@ class SqlQueryAgent(AgentBase):
         self,
         user_request: str,
         chat_history: List[Tuple[str, str]],
+        **_: object,
     ) -> str:
         if not chat_history:
             raise ValueError("chat_history must include the current user request")
@@ -235,9 +236,14 @@ class SqlQueryAgent(AgentBase):
 
         # Ensure only SELECT queries are allowed
         sql_clean = sql.rstrip(";").strip()
+        display_sql = sql_clean if sql_clean.endswith(";") else f"{sql_clean};"
         if not sql_clean.lower().startswith("select"):
             logger.warning("Generated query is not a SELECT statement: %s", sql_clean)
-            return "I can only execute read-only SELECT queries."
+            return (
+                "I can only execute read-only SELECT queries. The model "
+                "suggested: "
+                f"{display_sql}"
+            )
 
         # Execute the query
         try:
@@ -247,24 +253,40 @@ class SqlQueryAgent(AgentBase):
             err = str(e).lower()
             if "does not exist" in err:
                 # Likely missing table or column
-                return "I couldn't execute the query: one of the tables or columns was not found."
-            return "I couldn't execute the query due to an error."
+                return (
+                    "SQL Query:\n"
+                    f"{display_sql}\n\n"
+                    "I couldn't execute the query: one of the tables or columns was not found."
+                )
+            return (
+                "SQL Query:\n"
+                f"{display_sql}\n\n"
+                "I couldn't execute the query due to an error."
+            )
 
         # Check if result is empty
         if df.empty:
-            return "No results found."
+            return "SQL Query:\n" + display_sql + "\n\nNo results found."
 
         # Format results
         # Single value aggregate (1x1)
         if df.shape == (1, 1):
             col = df.columns[0]
             val = df.iloc[0, 0]
-            return f"{col}: **{val}**"
+            return (
+                "SQL Query:\n"
+                f"{display_sql}\n\n"
+                f"Result:\n{col}: **{val}**"
+            )
 
         # Single row with multiple columns -> inline key: value
         if df.shape[0] == 1:
             pairs = [f"{c}: {df.iloc[0][c]}" for c in df.columns]
-            return " | ".join(pairs)
+            return (
+                "SQL Query:\n"
+                f"{display_sql}\n\n"
+                "Result:\n" + " | ".join(pairs)
+            )
 
         # Multi-row results -> Markdown table (code block with pipes)
         header = " | ".join(str(c) for c in df.columns)
@@ -274,5 +296,11 @@ class SqlQueryAgent(AgentBase):
         table_block = "\n".join([header] + lines_display)
         if len(lines) > 20:
             table_block += f"\n... ({len(lines) - 20} more rows)"
-        return "**Results:**\n```\n" + table_block + "\n```"
+        return (
+            "SQL Query:\n"
+            f"{display_sql}\n\n"
+            "Results:\n```\n"
+            + table_block
+            + "\n```"
+        )
 

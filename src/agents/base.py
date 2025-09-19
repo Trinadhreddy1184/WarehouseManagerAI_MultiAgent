@@ -27,8 +27,21 @@ class AgentBase(abc.ABC):
         self,
         user_request: str,
         chat_history: List[Tuple[str, str]],
+        **kwargs: Any,
     ) -> str:
-        """Generate a response to the user's request."""
+        """Generate a response to the user's request.
+
+        Parameters
+        ----------
+        user_request : str
+            Latest message from the user.
+        chat_history : List[Tuple[str, str]]
+            Running conversation history.
+        **kwargs : Any
+            Optional keyword arguments supplied by the :class:`AgentManager`
+            (for example, additional context). Implementations may ignore
+            values they do not use.
+        """
         raise NotImplementedError
 
 class AgentException(Exception):
