@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd /opt/WarehouseManagerAI
-python3 -m venv .venv
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$SCRIPT_DIR"
+cd "$REPO_ROOT"
+
+if [ ! -d .venv ]; then
+  python3 -m venv .venv
+fi
 source .venv/bin/activate
 pip install -r requirements.txt
 
-
-# Load env exactly as you requested
+# Load environment from .env if present (keeps values supplied by the caller)
 if [ -f .env ]; then
   # shellcheck disable=SC2046
   export $(grep -v '^#' .env | xargs)
@@ -15,7 +20,40 @@ fi
 log() { echo -e "\n\033[1;32m[run_all]\033[0m $*"; }
 die() { echo "❌ $*" >&2; exit 1; }
 
-# Required env (your set)
+host_port_reachable() {
+  local host="$1"
+  local port="$2"
+  python3 - "$host" "$port" <<'PY' || return 1
+import socket
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(1.5)
+try:
+    s.connect((host, port))
+except Exception:
+    sys.exit(1)
+finally:
+    s.close()
+PY
+}
+
+# Track whether DB host/port were supplied explicitly so we avoid overwriting
+DB_HOST_FROM_ENV=1
+DB_PORT_FROM_ENV=1
+if [ -z "${DB_HOST:-}" ]; then
+  DB_HOST="localhost"
+  DB_HOST_FROM_ENV=0
+fi
+if [ -z "${DB_PORT:-}" ]; then
+  DB_PORT="5432"
+  DB_PORT_FROM_ENV=0
+fi
+
+# Required env for the workflow
 : "${BEDROCK_MODEL_ID:?missing}"
 : "${LLM_TEMPERATURE:?missing}"
 : "${LLM_TOP_P:?missing}"
@@ -24,14 +62,14 @@ die() { echo "❌ $*" >&2; exit 1; }
 : "${S3_BUCKET:?missing}"
 : "${S3_KEY:?missing}"
 
-: "${DB_HOST:=localhost}"
-: "${DB_PORT:=5432}"
 : "${DB_NAME:?missing}"
 : "${DB_USER:?missing}"
 : "${DB_PASS:?missing}"
-: "${DATABASE_URL:=postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}}"
 
-APP_DIR="/opt/WarehouseManagerAI"
+DB_CONTAINER="${DB_CONTAINER:-warehousemanagerai_db}"
+DB_VOLUME="${DB_VOLUME:-warehousemanagerai_db_data}"
+
+APP_DIR="$REPO_ROOT"
 VIEWS_SQL="${APP_DIR}/views/999_app_views.sql"
 
 # Pick compose command
@@ -42,25 +80,81 @@ else
 fi
 
 # Free port 5432 in case host PG is running
-sudo systemctl stop postgresql >/dev/null 2>&1 || true
-sudo fuser -k 5432/tcp >/dev/null 2>&1 || true
+if command -v systemctl >/dev/null 2>&1; then
+  sudo systemctl stop postgresql >/dev/null 2>&1 || true
+fi
+if command -v fuser >/dev/null 2>&1; then
+  sudo fuser -k 5432/tcp >/dev/null 2>&1 || true
+fi
 
 log "Starting Postgres (pgvector) via Docker Compose…"
 $DC up -d db || true
 
-STATUS=$(docker inspect -f '{{.State.Status}}' warehousemanagerai_db 2>/dev/null || echo "not-found")
+STATUS=$(docker inspect -f '{{.State.Status}}' "$DB_CONTAINER" 2>/dev/null || echo "not-found")
 if [ "$STATUS" != "running" ]; then
   log "Container status: $STATUS. Resetting volume and retrying…"
   $DC down
-  docker volume rm warehousemanagerai_db_data >/dev/null 2>&1 || true
+  docker volume rm "$DB_VOLUME" >/dev/null 2>&1 || true
   $DC up -d db
 fi
 
 log "Waiting for Postgres to be ready…"
-until docker exec warehousemanagerai_db pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; do
+until docker exec "$DB_CONTAINER" pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; do
   sleep 1
 done
-log "Postgres is ready on ${DB_HOST}:${DB_PORT}"
+log "Postgres is ready inside ${DB_CONTAINER}."
+
+HOST_BINDING=$($DC port db 5432 2>/dev/null || true)
+if [ -n "$HOST_BINDING" ]; then
+  HOST_ADDR="${HOST_BINDING%:*}"
+  HOST_ADDR="${HOST_ADDR##*:}"
+  HOST_PORT="${HOST_BINDING##*:}"
+  if [[ "$HOST_ADDR" == "0.0.0.0" ]]; then
+    HOST_ADDR="localhost"
+  fi
+  log "Docker published Postgres on ${HOST_ADDR}:${HOST_PORT}."
+  if [[ $DB_HOST_FROM_ENV -eq 0 ]]; then
+    DB_HOST="$HOST_ADDR"
+  fi
+  if [[ $DB_PORT_FROM_ENV -eq 0 ]]; then
+    DB_PORT="$HOST_PORT"
+  fi
+else
+  log "Docker did not report a host port; continuing with DB_HOST=${DB_HOST} and DB_PORT=${DB_PORT}."
+fi
+
+DB_CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$DB_CONTAINER" 2>/dev/null || true)
+if [ -n "$DB_CONTAINER_IP" ]; then
+  if [[ "${USE_CONTAINER_IP:-0}" == "1" ]]; then
+    log "USE_CONTAINER_IP=1 – using container address ${DB_CONTAINER_IP}:5432."
+    DB_HOST="$DB_CONTAINER_IP"
+    DB_PORT="5432"
+    log "Using DB_HOST=${DB_HOST} (container IP)."
+  elif [[ $DB_HOST_FROM_ENV -eq 0 ]]; then
+    if host_port_reachable "$DB_HOST" "$DB_PORT"; then
+      log "Confirmed ${DB_HOST}:${DB_PORT} is reachable from the host."
+    else
+      log "Host ${DB_HOST}:${DB_PORT} unreachable; falling back to container IP ${DB_CONTAINER_IP}."
+      DB_HOST="$DB_CONTAINER_IP"
+      DB_PORT="5432"
+      log "Using DB_HOST=${DB_HOST} (container IP)."
+    fi
+  else
+    log "DB_HOST supplied externally (${DB_HOST}); container IP is ${DB_CONTAINER_IP}."
+  fi
+else
+  log "Unable to determine container IP for ${DB_CONTAINER}; continuing with DB_HOST=${DB_HOST}."
+fi
+
+export DB_HOST
+export DB_PORT
+
+if [ -z "${DATABASE_URL:-}" ]; then
+  DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+fi
+export DATABASE_URL
+MASKED_URL="postgresql://${DB_USER}:***@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+log "Using DATABASE_URL=${MASKED_URL}."
 
 # Helper: stream filter to drop problematic role lines (NO temp files)
 stream_filter() {
@@ -75,39 +169,39 @@ stream_filter() {
 # Check for existing data
 log "Checking for existing data (vip_products)…"
 TABLE_EXISTS=$(
-  docker exec -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+  docker exec -e PGPASSWORD="$DB_PASS" "$DB_CONTAINER" \
     psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT to_regclass('public.vip_products');" || true
 )
 
 if [ "$TABLE_EXISTS" = "vip_products" ]; then
   log "Data already present; skipping import."
-  docker exec -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+  docker exec -e PGPASSWORD="$DB_PASS" "$DB_CONTAINER" \
     psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector;"
 else
   log "No data found; preparing schema + extension…"
-  docker exec -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+  docker exec -e PGPASSWORD="$DB_PASS" "$DB_CONTAINER" \
     psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public AUTHORIZATION ${DB_USER};"
-  docker exec -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+  docker exec -e PGPASSWORD="$DB_PASS" "$DB_CONTAINER" \
     psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
   if [ -n "${SQL_FILE:-}" ] && [ -f "$SQL_FILE" ]; then
     log "Importing from local file: $SQL_FILE (sanitized grants/owners)"
-    stream_filter < "$SQL_FILE" | docker exec -i -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+    stream_filter < "$SQL_FILE" | docker exec -i -e PGPASSWORD="$DB_PASS" "$DB_CONTAINER" \
       psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1
   elif [ -n "${S3_PRESIGNED_URL:-}" ]; then
     log "Importing from presigned URL (sanitized grants/owners)…"
-    curl -sSL "$S3_PRESIGNED_URL" | stream_filter | docker exec -i -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+    curl -sSL "$S3_PRESIGNED_URL" | stream_filter | docker exec -i -e PGPASSWORD="$DB_PASS" "$DB_CONTAINER" \
       psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1
   else
     log "Importing from s3://$S3_BUCKET/$S3_KEY (sanitized grants/owners)…"
-    aws s3 cp "s3://${S3_BUCKET}/${S3_KEY}" - | stream_filter | docker exec -i -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+    aws s3 cp "s3://${S3_BUCKET}/${S3_KEY}" - | stream_filter | docker exec -i -e PGPASSWORD="$DB_PASS" "$DB_CONTAINER" \
       psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1
   fi
   log "Import complete."
 
   # Post-import: normalize ownership & permissions for app user
   log "Normalizing ownership to ${DB_USER} and granting read permissions…"
-  docker exec -e PGPASSWORD="$DB_PASS" warehousemanagerai_db psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 <<PSQL
+  docker exec -e PGPASSWORD="$DB_PASS" "$DB_CONTAINER" psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 <<PSQL
 -- Make sure public schema belongs to app
 ALTER SCHEMA public OWNER TO "${DB_USER}";
 
@@ -155,33 +249,37 @@ if [ ! -f "$VIEWS_SQL" ]; then
   die "Missing $VIEWS_SQL"
 fi
 VIEW_EXISTS=$(
-  docker exec -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+  docker exec -e PGPASSWORD="$DB_PASS" "$DB_CONTAINER" \
     psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT to_regclass('public.app_inventory');" || true
 )
 if [ "$VIEW_EXISTS" = "app_inventory" ]; then
   log "View app_inventory already exists; skipping SQL apply."
 else
   log "Applying ${VIEWS_SQL} …"
-  docker exec -i -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+  docker exec -i -e PGPASSWORD="$DB_PASS" "$DB_CONTAINER" \
     psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 < "$VIEWS_SQL"
   log "Views applied."
 fi
 
-# Export DB URL for app
-export DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
-log "DATABASE_URL set to: ${DATABASE_URL}"
+# Ensure DATABASE_URL reflects any updated host/port values
+if [ -z "${DATABASE_URL:-}" ]; then
+  DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+  export DATABASE_URL
+fi
+MASKED_URL="postgresql://${DB_USER}:***@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+log "DATABASE_URL confirmed as ${MASKED_URL}"
 
 # Verify
 log "Verifying app_inventory…"
-docker exec -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+docker exec -e PGPASSWORD="$DB_PASS" "$DB_CONTAINER" \
   psql -U "$DB_USER" -d "$DB_NAME" -c "SELECT COUNT(*) AS total_items FROM app_inventory;" || true
-docker exec -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+docker exec -e PGPASSWORD="$DB_PASS" "$DB_CONTAINER" \
   psql -U "$DB_USER" -d "$DB_NAME" -c "SELECT store, product_name, brand_name FROM app_inventory LIMIT 5;" || true
 
 log "✅ Postgres in Docker is ready, with grants/owners stripped (no extra roles needed)."
 
 log "Exporting database schema to src/database/schema.json"
-docker exec -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+docker exec -e PGPASSWORD="$DB_PASS" "$DB_CONTAINER" \
   psql -U "$DB_USER" -d "$DB_NAME" -t -c \
   "SELECT jsonb_pretty(jsonb_object_agg(table_name, columns)) FROM \
    (SELECT table_name, jsonb_agg(column_name ORDER BY ordinal_position) AS columns \

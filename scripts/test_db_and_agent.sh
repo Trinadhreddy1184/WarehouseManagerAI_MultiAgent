@@ -4,11 +4,15 @@
 # - Starts/uses the "db" service from docker-compose
 # - Verifies app_inventory exists
 # - Runs a short Python test that calls ProductLookupAgent
+# Set USE_CONTAINER_IP=1 if you need to bypass the host port mapping and talk to the
+# container directly.
 
 set -euo pipefail
 
-# Always run from repo root (adjust if your path differs)
-cd /opt/WarehouseManagerAI
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+export REPO_ROOT
 
 # Load env exactly as you requested
 if [ -f .env ]; then
@@ -19,6 +23,27 @@ fi
 log() { echo -e "\n\033[1;32m[test]\033[0m $*"; }
 die() { echo "❌ $*" >&2; exit 1; }
 
+host_port_reachable() {
+  local host="$1"
+  local port="$2"
+  python3 - "$host" "$port" <<'PY' || return 1
+import socket
+import sys
+
+host = sys.argv[1]
+port = int(sys.argv[2])
+
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(1.5)
+try:
+    s.connect((host, port))
+except Exception:
+    sys.exit(1)
+finally:
+    s.close()
+PY
+}
+
 # Sanity checks for required tools
 command -v docker >/dev/null 2>&1 || die "docker not found"
 if command -v docker-compose >/dev/null 2>&1; then
@@ -28,26 +53,87 @@ else
 fi
 
 # Sanity env (DB_* must be set in .env)
-: "${DB_HOST:=localhost}"
-: "${DB_PORT:=5432}"
+DB_HOST_FROM_ENV=1
+DB_PORT_FROM_ENV=1
+if [ -z "${DB_HOST:-}" ]; then
+  DB_HOST="localhost"
+  DB_HOST_FROM_ENV=0
+fi
+if [ -z "${DB_PORT:-}" ]; then
+  DB_PORT="5432"
+  DB_PORT_FROM_ENV=0
+fi
 : "${DB_NAME:?DB_NAME missing}"
 : "${DB_USER:?DB_USER missing}"
 : "${DB_PASS:?DB_PASS missing}"
+DB_CONTAINER="${DB_CONTAINER:-warehousemanagerai_db}"
 
 log "Bringing up Postgres (pgvector) via Docker Compose…"
 $DC up -d db
 
 # Wait for DB readiness inside the container (no role assumptions)
 log "Waiting for PostgreSQL to become ready…"
-until docker exec warehousemanagerai_db pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; do
+until docker exec "$DB_CONTAINER" pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; do
   sleep 1
 done
-log "Postgres is ready on ${DB_HOST}:${DB_PORT}."
+log "Postgres is ready inside ${DB_CONTAINER}."
+
+HOST_BINDING=$($DC port db 5432 2>/dev/null || true)
+if [ -n "$HOST_BINDING" ]; then
+  HOST_ADDR="${HOST_BINDING%:*}"
+  HOST_ADDR="${HOST_ADDR##*:}"
+  HOST_PORT="${HOST_BINDING##*:}"
+  if [[ "$HOST_ADDR" == "0.0.0.0" ]]; then
+    HOST_ADDR="localhost"
+  fi
+  log "Docker published Postgres on ${HOST_ADDR}:${HOST_PORT}."
+  if [[ $DB_HOST_FROM_ENV -eq 0 ]]; then
+    DB_HOST="$HOST_ADDR"
+  fi
+  if [[ $DB_PORT_FROM_ENV -eq 0 ]]; then
+    DB_PORT="$HOST_PORT"
+  fi
+else
+  log "Docker did not report a host port; continuing with DB_HOST=${DB_HOST} and DB_PORT=${DB_PORT}."
+fi
+
+DB_CONTAINER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$DB_CONTAINER" 2>/dev/null || true)
+if [ -n "$DB_CONTAINER_IP" ]; then
+  if [[ "${USE_CONTAINER_IP:-0}" == "1" ]]; then
+    log "USE_CONTAINER_IP=1 – using container address ${DB_CONTAINER_IP}:5432."
+    DB_HOST="$DB_CONTAINER_IP"
+    DB_PORT="5432"
+    log "Using DB_HOST=${DB_HOST} (container IP)."
+  elif [[ $DB_HOST_FROM_ENV -eq 0 ]]; then
+    if host_port_reachable "$DB_HOST" "$DB_PORT"; then
+      log "Confirmed ${DB_HOST}:${DB_PORT} is reachable from the host."
+    else
+      log "Host ${DB_HOST}:${DB_PORT} unreachable; falling back to container IP ${DB_CONTAINER_IP}."
+      DB_HOST="$DB_CONTAINER_IP"
+      DB_PORT="5432"
+      log "Using DB_HOST=${DB_HOST} (container IP)."
+    fi
+  else
+    log "DB_HOST supplied externally (${DB_HOST}); container IP is ${DB_CONTAINER_IP}."
+  fi
+else
+  log "Unable to determine container IP for ${DB_CONTAINER}; continuing with DB_HOST=${DB_HOST}."
+fi
+
+export DB_HOST
+export DB_PORT
+
+if [ -z "${DATABASE_URL:-}" ]; then
+  DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+fi
+export DATABASE_URL
+MASKED_URL="postgresql://${DB_USER}:***@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+log "DATABASE_URL=${MASKED_URL}"
 
 # Verify app_inventory view exists; if not, guide the user and exit
 log "Checking for view 'app_inventory'…"
 VIEW_EXISTS=$(
-  docker exec -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+  docker exec -e PGPASSWORD="$DB_PASS" "$DB_CONTAINER" \
     psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT to_regclass('public.app_inventory');" || true
 )
 
@@ -61,7 +147,7 @@ fi
 
 # Quick peek
 log "Sample rows from app_inventory:"
-docker exec -e PGPASSWORD="$DB_PASS" warehousemanagerai_db \
+docker exec -e PGPASSWORD="$DB_PASS" "$DB_CONTAINER" \
   psql -U "$DB_USER" -d "$DB_NAME" -c "SELECT store, product_name, brand_name FROM app_inventory LIMIT 5;" || true
 
 # Inline Python smoke test for ProductLookupAgent (no roles required)
@@ -69,7 +155,7 @@ log "Running Python smoke test for ProductLookupAgent…"
 python3 - <<'PY'
 import os, sys, textwrap
 
-ROOT = "/opt/WarehouseManagerAI"
+ROOT = os.getenv("REPO_ROOT", os.getcwd())
 sys.path.append(os.path.join(ROOT, "src"))
 
 # Load .env if available
