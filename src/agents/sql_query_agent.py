@@ -56,12 +56,21 @@ class SqlQueryAgent(AgentBase):
             self.bedrock_client = self.llm_manager.llm._br  # type: ignore[attr-defined]
         except Exception as e:
             logger.warning("Bedrock client not found on LLMManager; creating a new one: %s", e)
-            region = (
+            configured_region = (
                 self.llm_manager.config.get("bedrock", {}).get("region_name")
                 if hasattr(self.llm_manager, "config")
                 else None
-            ) or "us-east-1"
-            self.bedrock_client = boto3.client("bedrock-runtime", region_name=region)
+            )
+            default_region = "us-east-1"
+            if configured_region and configured_region != default_region:
+                logger.warning(
+                    "SqlQueryAgent overriding region %s with required region %s",
+                    configured_region,
+                    default_region,
+                )
+            self.bedrock_client = boto3.client(
+                "bedrock-runtime", region_name=default_region
+            )
 
     def name(self) -> str:
         return self.NAME
@@ -93,13 +102,12 @@ class SqlQueryAgent(AgentBase):
             " bottom ",
         ]
 
-        if any(phrase in text for phrase in aggregate_triggers):
-            return 0.95
-
         analytic_keywords = [
             "inventory",
+            "inventory level",
             "warehouse",
             "stock",
+            "stocked",
             "store",
             "availability",
             "available",
@@ -108,14 +116,38 @@ class SqlQueryAgent(AgentBase):
             "lookup",
             "report",
             "catalog",
+            "catalogue",
             "sku",
+            "skus",
+            "item",
+            "items",
             "product",
             "brand",
             "units",
+            "cases",
             "quantity",
+            "supply",
             "do we have",
             "in stock",
+            "carrying",
+            "carry",
             "app_inventory",
+        ]
+
+        question_leads = [
+            "how many",
+            "how much",
+            "what is",
+            "what are",
+            "which",
+            "where",
+            "show me",
+            "list",
+            "give me",
+            "provide",
+            "find",
+            "are there",
+            "do we have",
         ]
 
         follow_up = False
@@ -125,11 +157,27 @@ class SqlQueryAgent(AgentBase):
                 prev_text = prev_message.lower()
                 if any(keyword in prev_text for keyword in ("result", "inventory", "product", "store")):
                     follow_up = True
+        score = 0.0
 
-        if any(keyword in text for keyword in analytic_keywords) or follow_up:
-            return 0.8
+        if any(phrase in text for phrase in aggregate_triggers):
+            score = max(score, 0.95)
 
-        return 0.0
+        domain_hit = any(keyword in text for keyword in analytic_keywords)
+        if domain_hit:
+            score = max(score, 0.8)
+
+        question_hit = text.endswith("?") or any(
+            text.startswith(lead) or f" {lead}" in text for lead in question_leads
+        )
+        if question_hit and domain_hit:
+            score = max(score, 0.85)
+        elif question_hit:
+            score = max(score, 0.65)
+
+        if follow_up:
+            score = max(score, 0.8)
+
+        return score
 
     def handle(
         self,
@@ -200,11 +248,21 @@ class SqlQueryAgent(AgentBase):
                 schema_str = ""
 
         # Build system prompt including schema information
-        system_prompt = "You are a SQL expert for a warehouse inventory database.\n"
+        system_prompt = (
+            "You are a SQL expert for a warehouse inventory database.\n"
+            "Carefully analyse the user's question and determine which tables and columns are required before writing SQL.\n"
+        )
         if schema_str:
             system_prompt += "The database has the following tables and columns:\n"
             system_prompt += schema_str + "\n"
         system_prompt += (
+            "Follow these rules when writing the query:\n"
+            "1. Use only read-only SELECT statements; never modify data.\n"
+            "2. Prefer `app_inventory` for stock levels and join `vip_products` or related tables when names are required.\n"
+            "3. When matching user-supplied names or identifiers, use case-insensitive comparisons such as ILIKE with surrounding percent wildcards to handle partial matches.\n"
+            "4. Apply aggregates (COUNT, SUM, AVG, etc.) when the question implies totals or averages.\n"
+            "5. For list-style outputs, include `LIMIT 50` to keep results concise unless the question specifies a different limit.\n"
+            "6. Do not invent filters that the user did not mention.\n"
             "Output ONLY a single SQL SELECT statement (no backticks, no explanations). "
             "Do not modify or write any data."
         )

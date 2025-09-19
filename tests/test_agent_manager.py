@@ -62,7 +62,7 @@ def test_general_agent_receives_specialist_context():
     assert llm.last_context is not None
     assert "First specialist answer" in llm.last_context
     assert "Second specialist answer" in llm.last_context
-    assert "specialist agent outputs" in llm.last_context.lower()
+    assert "validated findings" in llm.last_context.lower()
     trace = manager.get_last_trace()
     assert trace is not None
     assert trace["user_request"] == "request"

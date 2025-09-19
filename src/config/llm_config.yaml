@@ -6,4 +6,4 @@ llm:
   max_tokens: ${LLM_MAX_TOKENS}
 bedrock:
   # AWS region for Bedrock runtime
-  region_name: ${AWS_REGION}
+  region_name: us-east-1
