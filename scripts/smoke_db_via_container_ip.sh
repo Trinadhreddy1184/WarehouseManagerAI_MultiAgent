@@ -8,7 +8,9 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+
 export REPO_ROOT
+
 
 log() { echo -e "\n\033[1;34m[smoke]\033[0m $*"; }
 die() { echo "❌ $*" >&2; exit 1; }
@@ -76,14 +78,17 @@ python3 - <<'PY'
 import os, sys, textwrap
 
 ROOT = os.getenv("REPO_ROOT", os.getcwd())
+
 sys.path.append(os.path.join(ROOT, "src"))
 
 from src.agents.product_lookup_agent import ProductLookupAgent
 from src.database.db_manager import get_db
 
+
 db_url = os.getenv("DATABASE_URL", "")
 masked = (db_url[: db_url.find("@")] + "@***") if "@" in db_url else (db_url or "(not set)")
 print("[py] DATABASE_URL:", masked)
+
 
 try:
     df = get_db().query_df("SELECT 1 AS ok", None)
