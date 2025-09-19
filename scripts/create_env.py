@@ -13,12 +13,15 @@ BEDROCK_MODEL_ID=amazon.nova-pro-v1:0
 BEDROCK_EMBEDDING_MODEL_ID=amazon.titan-embed-text-v1
 S3_BUCKET=your-bucket
 S3_KEY=path/to/dump.sql
+DB_CONTAINER=warehousemanagerai_db
+USE_CONTAINER_IP=1
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=warehouse
 DB_USER=app
+DB_PASS=app_pw
 DB_PASSWORD=app_pw
-DATABASE_URL=postgresql://app:app_pw@localhost:5432/warehouse
+DATABASE_URL=
 """
 
 
