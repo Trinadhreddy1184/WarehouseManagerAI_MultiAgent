@@ -32,15 +32,27 @@ class ResponseEvaluator:
     # Patterns that suggest the agent could not handle the request
     FAILURE_PATTERNS = (
         r"i'm sorry",
+        r"i am sorry",
         r"couldn't",
         r"cannot",
+        r"can't",
         r"no results found",
         r"no products found",
         r"language model is unavailable",
+        r"i don't know",
+        r"i do not know",
+        r"not sure",
+        r"unable to",
+        r"no information",
+        r"please try again",
     )
 
     def evaluate(self, user_request: str, response: str) -> float:
         """Return a score in [0, 1] for the supplied response."""
+        if not response or not response.strip():
+            logger.debug("ResponseEvaluator: empty response detected")
+            return 0.0
+
         text = response.lower()
         if any(re.search(pat, text) for pat in self.FAILURE_PATTERNS):
             logger.debug(

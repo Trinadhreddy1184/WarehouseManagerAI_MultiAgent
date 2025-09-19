@@ -194,32 +194,62 @@ class AgentManager:
             "You are the general chat agent responsible for synthesising the specialist",
             "agents' findings into a final answer for the user.",
             "Follow these rules:",
-            "1. Use the factual data from specialists when available.",
-            "2. Combine consistent insights into a single clear response.",
-            "3. Highlight uncertainties or missing data if every agent failed.",
-            "4. Keep the tone professional and helpful.",
+            "1. Provide a single, helpful response tailored to the user's question.",
+            "2. Use the verified findings below without mentioning tool or agent names.",
+            "3. Summarise data in natural language; reference SQL or internal details only when essential to the user's request.",
+            "4. If every finding failed or returned no data, explain the gap and suggest next steps.",
+            "5. Maintain a professional and concise tone.",
             "",
             f"User request: {user_request}",
-            "",
-            "Specialist agent outputs:",
         ]
 
-        if not agent_records:
-            context_lines.append("(No specialist agents produced responses.)")
+        confirmed_findings: List[str] = []
+        tentative_findings: List[str] = []
+        error_notes: List[str] = []
 
         for record in agent_records:
-            name = record.get("name", "UnknownAgent")
-            score = record.get("score", 0.0)
-            status = record.get("status", "no_response")
-            evaluation = record.get("evaluation")
-            status_fragments = [f"relevance={score:.2f}"]
-            if evaluation is not None:
-                status_fragments.append(f"quality={evaluation:.2f}")
-            status_line = f"- {name} ({', '.join(status_fragments)}): {status}"
-            context_lines.append(status_line)
-            detail = record.get("response") or record.get("error") or "(no response)"
-            context_lines.append(detail.strip())
+            detail = (record.get("response") or record.get("error") or "").strip()
+            if not detail:
+                continue
+            status = record.get("status")
+            if status == "success":
+                confirmed_findings.append(detail)
+            elif status == "low_confidence":
+                tentative_findings.append(detail)
+            elif status == "error":
+                error_notes.append(detail)
+            else:
+                # Preserve any information from agents that didn't explicitly fail
+                tentative_findings.append(detail)
+
+        if confirmed_findings:
             context_lines.append("")
+            context_lines.append("Validated findings:")
+            for item in confirmed_findings:
+                context_lines.append(f"- {item}")
+
+        if tentative_findings:
+            context_lines.append("")
+            context_lines.append(
+                "Potentially useful observations (treat carefully if unsupported):"
+            )
+            for item in tentative_findings:
+                context_lines.append(f"- {item}")
+
+        if error_notes:
+            context_lines.append("")
+            context_lines.append(
+                "Tools that failed to provide data or encountered issues:"
+            )
+            for item in error_notes:
+                context_lines.append(f"- {item}")
+
+        if not (confirmed_findings or tentative_findings or error_notes):
+            context_lines.append("")
+            context_lines.append(
+                "No specialist information was available. Politely inform the user that you "
+                "could not obtain supporting data and encourage them to try a different query."
+            )
 
         synthesis_context = "\n".join(context_lines).strip()
         trace_data["context"] = synthesis_context

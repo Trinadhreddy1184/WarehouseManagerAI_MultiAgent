@@ -37,9 +37,17 @@ class BedrockLLM:
         if not model_id or "$" in model_id:
             model_id = "amazon.nova-pro-v1:0"
 
-        region = bed_conf.get("region_name")
-        if not region or "$" in region:
-            region = os.getenv("AWS_REGION", "us-east-1")
+        configured_region = bed_conf.get("region_name")
+        env_region = os.getenv("AWS_REGION")
+        default_region = "us-east-1"
+        region = configured_region or env_region or default_region
+        if region != default_region:
+            logger.warning(
+                "BedrockLLM overriding region %s with required region %s",
+                region,
+                default_region,
+            )
+            region = default_region
 
         def _safe_cast(value: Any, cast, default):
             try:
